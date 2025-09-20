@@ -82,49 +82,52 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       }
 
       try {
-        const baseTrainingQuery = supabase
+        const trainingResult = await supabase
           .from('training_data')
           .select('*')
           .order('created_at', { ascending: false });
 
-        const baseMaterialsQuery = supabase
-          .from('reference_materials')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        const baseLogicQuery = supabase
-          .from('logic_notes')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        let trainingResult;
         let materialsResult;
         let notesResult;
 
         if (userId) {
-          trainingResult = await baseTrainingQuery.eq('created_by', userId);
-          materialsResult = await baseMaterialsQuery.eq('uploaded_by', userId);
-          notesResult = await baseLogicQuery.eq('created_by', userId);
-
-          if (trainingResult.error) {
-            console.warn('Falling back to all training records:', trainingResult.error?.message || trainingResult.error);
-            trainingResult = await baseTrainingQuery;
-          }
+          materialsResult = await supabase
+            .from('reference_materials')
+            .select('*')
+            .eq('uploaded_by', userId)
+            .order('created_at', { ascending: false });
 
           if (materialsResult.error) {
             console.warn('Falling back to all reference materials:', materialsResult.error?.message || materialsResult.error);
-            materialsResult = await baseMaterialsQuery;
+            materialsResult = await supabase
+              .from('reference_materials')
+              .select('*')
+              .order('created_at', { ascending: false });
           }
+
+          notesResult = await supabase
+            .from('logic_notes')
+            .select('*')
+            .eq('created_by', userId)
+            .order('created_at', { ascending: false });
 
           if (notesResult.error) {
             console.warn('Falling back to all logic notes:', notesResult.error?.message || notesResult.error);
-            notesResult = await baseLogicQuery;
+            notesResult = await supabase
+              .from('logic_notes')
+              .select('*')
+              .order('created_at', { ascending: false });
           }
         } else {
-          [trainingResult, materialsResult, notesResult] = await Promise.all([
-            baseTrainingQuery,
-            baseMaterialsQuery,
-            baseLogicQuery
+          [materialsResult, notesResult] = await Promise.all([
+            supabase
+              .from('reference_materials')
+              .select('*')
+              .order('created_at', { ascending: false }),
+            supabase
+              .from('logic_notes')
+              .select('*')
+              .order('created_at', { ascending: false })
           ]);
         }
 
@@ -132,15 +135,15 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         if (materialsResult.error) throw materialsResult.error;
         if (notesResult.error) throw notesResult.error;
 
-        const trainingItems = (trainingResult.data || []).map(item => ({
+        const trainingItems = (trainingResult?.data || []).map(item => ({
           ...item,
           tags: Array.isArray(item.tags) ? item.tags : []
         }));
-        const materialItems = (materialsResult.data || []).map(item => ({
+        const materialItems = (materialsResult?.data || []).map(item => ({
           ...item,
           tags: Array.isArray(item.tags) ? item.tags : []
         }));
-        const logicItems = (notesResult.data || []).map(item => ({
+        const logicItems = (notesResult?.data || []).map(item => ({
           ...item,
           tags: Array.isArray(item.tags) ? item.tags : [],
           category: item.category || 'general'
@@ -293,7 +296,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       } else {
         const { error } = await supabase
           .from('training_data')
-          .insert([{ ...payload, created_by: userId }]);
+          .insert([payload]);
 
         if (error) throw error;
         showAlert('Q&A pair added successfully.', 'success');

@@ -104,12 +104,9 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
       <div className="stats-grid">
         {overviewCards.map((card) => (
           <div key={card.label} className="stat-card">
-            <div className="stat-icon" aria-hidden="true">{card.label.charAt(0)}</div>
-            <div>
-              <div className="stat-value">{card.value}</div>
-              <div className="stat-label">{card.label}</div>
-              <div className="stat-helper">{card.helper}</div>
-            </div>
+            <div className="stat-value">{card.value}</div>
+            <div className="stat-label">{card.label}</div>
+            <div className="stat-helper">{card.helper}</div>
           </div>
         ))}
       </div>
@@ -202,17 +199,13 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
 
         .stat-card {
           display: flex;
-          align-items: center;
-          gap: var(--space-4);
+          flex-direction: column;
+          gap: var(--space-2);
           padding: var(--space-5);
           border-radius: var(--radius-xl);
           border: 1px solid var(--gray-200);
           background: var(--white);
           box-shadow: var(--shadow-sm);
-        }
-
-        .stat-icon {
-          font-size: 2rem;
         }
 
         .stat-value {
