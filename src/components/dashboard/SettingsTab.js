@@ -16,6 +16,8 @@ const SettingsTab = ({ user, supabase }) => {
   const [saving, setSaving] = useState(false);
   const [linking, setLinking] = useState(false);
   const [alert, setAlert] = useState(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [tenantUser, setTenantUser] = useState(null);
 
   useEffect(() => {
     setProfile({
@@ -41,6 +43,59 @@ const SettingsTab = ({ user, supabase }) => {
     setAlert({ message, type });
     setTimeout(() => setAlert(null), 3500);
   };
+
+  useEffect(() => {
+    const loadProfileFromSupabase = async () => {
+      if (!supabase || !user?.id) {
+        setInitialLoading(false);
+        return;
+      }
+
+      try {
+        const [profileResult, tenantResult] = await Promise.all([
+          supabase
+            .from('profiles')
+            .select('full_name, email')
+            .eq('id', user.id)
+            .maybeSingle(),
+          supabase
+            .from('tenant_users')
+            .select('tenant_id, name, email, persona_settings')
+            .eq('user_id', user.id)
+            .maybeSingle()
+        ]);
+
+        if (profileResult?.data) {
+          setProfile(prev => ({
+            ...prev,
+            fullName: profileResult.data.full_name || prev.fullName,
+            email: profileResult.data.email || prev.email
+          }));
+        }
+
+        if (tenantResult?.data) {
+          const personaSettings = tenantResult.data.persona_settings || {};
+          setTenantUser(tenantResult.data);
+          setProfile(prev => ({
+            ...prev,
+            fullName: tenantResult.data.name || prev.fullName,
+            email: tenantResult.data.email || prev.email,
+            bio: personaSettings.bio || prev.bio,
+            username: personaSettings.username || prev.username
+          }));
+        } else {
+          setTenantUser(null);
+        }
+      } catch (error) {
+        console.error('Failed to load profile from Supabase:', error);
+        showAlert('Unable to load profile details from Supabase.', 'error');
+      } finally {
+        setInitialLoading(false);
+      }
+    };
+
+    loadProfileFromSupabase();
+  }, [supabase, user?.id]);
 
   const handleProfileSave = async (event) => {
     event.preventDefault();
@@ -70,6 +125,52 @@ const SettingsTab = ({ user, supabase }) => {
       if (error) throw error;
 
       setIdentities(data?.user?.identities || identities);
+
+      const timestamp = new Date().toISOString();
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          full_name: profile.fullName || null,
+          email: profile.email || null,
+          updated_at: timestamp
+        }, { onConflict: 'id' });
+
+      if (profileError) throw profileError;
+
+      if (tenantUser?.tenant_id) {
+        const updatedPersonaSettings = {
+          ...(tenantUser.persona_settings || {}),
+          bio: profile.bio,
+          username: profile.username
+        };
+
+        const { data: tenantData, error: tenantError } = await supabase
+          .from('tenant_users')
+          .upsert({
+            user_id: user.id,
+            tenant_id: tenantUser.tenant_id,
+            email: profile.email,
+            name: profile.fullName,
+            persona_settings: updatedPersonaSettings
+          }, { onConflict: 'user_id' });
+
+        if (tenantError) throw tenantError;
+
+        if (tenantData && tenantData.length > 0) {
+          setTenantUser(tenantData[0]);
+        } else {
+          setTenantUser(prev => ({
+            ...(prev || {}),
+            tenant_id: tenantUser.tenant_id,
+            email: profile.email,
+            name: profile.fullName,
+            persona_settings: updatedPersonaSettings
+          }));
+        }
+      }
+
       showAlert('Profile updated successfully.', 'success');
     } catch (error) {
       showAlert(error.message || 'Failed to update profile.', 'error');
@@ -179,104 +280,112 @@ const SettingsTab = ({ user, supabase }) => {
         </div>
       )}
 
-      <section className="section">
-        <header>
-          <h2>Profile details</h2>
-          <p>Update the information displayed across your dashboard and widget.</p>
-        </header>
-
-        <form className="profile-form" onSubmit={handleProfileSave}>
-          <div className="avatar-field">
-            <div className="avatar-preview">
-              {profile.avatarUrl ? (
-                <img src={profile.avatarUrl} alt="Profile" />
-              ) : (
-                <span className="avatar-placeholder">{user?.email?.[0]?.toUpperCase() || 'A'}</span>
-              )}
-            </div>
-            <label className="upload-btn">
-              Change photo
-              <input type="file" accept="image/*" onChange={handleAvatarUpload} />
-            </label>
-          </div>
-
-          <label className="form-control">
-            <span>Full name</span>
-            <input
-              type="text"
-              value={profile.fullName}
-              onChange={(event) => handleProfileChange('fullName', event.target.value)}
-              placeholder="Your name"
-            />
-          </label>
-
-          <label className="form-control">
-            <span>Username</span>
-            <input
-              type="text"
-              value={profile.username}
-              onChange={(event) => handleProfileChange('username', event.target.value)}
-              placeholder="workspace-handle"
-            />
-          </label>
-
-          <label className="form-control">
-            <span>Email</span>
-            <input
-              type="email"
-              value={profile.email}
-              onChange={(event) => handleProfileChange('email', event.target.value)}
-              placeholder="name@example.com"
-            />
-          </label>
-
-          <label className="form-control">
-            <span>Bio</span>
-            <textarea
-              value={profile.bio}
-              onChange={(event) => handleProfileChange('bio', event.target.value)}
-              placeholder="Tell collaborators about yourself"
-              rows={4}
-            />
-          </label>
-
-          <button type="submit" className="primary-btn" disabled={saving}>
-            {saving ? (
-              <span className="btn-loading">
-                <LoadingSpinner size="small" color="white" />
-                <span>Saving…</span>
-              </span>
-            ) : (
-              'Save changes'
-            )}
-          </button>
-        </form>
-      </section>
-
-      <section className="section">
-        <header>
-          <h2>Connected accounts</h2>
-          <p>Link a Google account for quicker sign-in and calendar integrations.</p>
-        </header>
-
-        <div className="connected-card">
-          <div>
-            <h3>Google</h3>
-            <p>{googleIdentity ? 'Google account linked.' : 'No Google account linked yet.'}</p>
-          </div>
-          <div className="connected-actions">
-            {googleIdentity ? (
-              <button className="outline-btn" onClick={handleUnlinkGoogle} disabled={linking}>
-                {linking ? 'Disconnecting…' : 'Disconnect Google'}
-              </button>
-            ) : (
-              <button className="primary-btn" onClick={handleLinkGoogle} disabled={linking}>
-                {linking ? 'Opening…' : 'Link Google account'}
-              </button>
-            )}
-          </div>
+      {initialLoading ? (
+        <div className="loading-state">
+          <LoadingSpinner size="large" message="Loading profile settings..." />
         </div>
-      </section>
+      ) : (
+        <>
+          <section className="section">
+            <header>
+              <h2>Profile details</h2>
+              <p>Update the information displayed across your dashboard and widget.</p>
+            </header>
+
+            <form className="profile-form" onSubmit={handleProfileSave}>
+              <div className="avatar-field">
+                <div className="avatar-preview">
+                  {profile.avatarUrl ? (
+                    <img src={profile.avatarUrl} alt="Profile" />
+                  ) : (
+                    <span className="avatar-placeholder">{user?.email?.[0]?.toUpperCase() || 'A'}</span>
+                  )}
+                </div>
+                <label className="upload-btn">
+                  Change photo
+                  <input type="file" accept="image/*" onChange={handleAvatarUpload} />
+                </label>
+              </div>
+
+              <label className="form-control">
+                <span>Full name</span>
+                <input
+                  type="text"
+                  value={profile.fullName}
+                  onChange={(event) => handleProfileChange('fullName', event.target.value)}
+                  placeholder="Your name"
+                />
+              </label>
+
+              <label className="form-control">
+                <span>Username</span>
+                <input
+                  type="text"
+                  value={profile.username}
+                  onChange={(event) => handleProfileChange('username', event.target.value)}
+                  placeholder="workspace-handle"
+                />
+              </label>
+
+              <label className="form-control">
+                <span>Email</span>
+                <input
+                  type="email"
+                  value={profile.email}
+                  onChange={(event) => handleProfileChange('email', event.target.value)}
+                  placeholder="name@example.com"
+                />
+              </label>
+
+              <label className="form-control">
+                <span>Bio</span>
+                <textarea
+                  value={profile.bio}
+                  onChange={(event) => handleProfileChange('bio', event.target.value)}
+                  placeholder="Tell collaborators about yourself"
+                  rows={4}
+                />
+              </label>
+
+              <button type="submit" className="primary-btn" disabled={saving}>
+                {saving ? (
+                  <span className="btn-loading">
+                    <LoadingSpinner size="small" color="white" />
+                    <span>Saving…</span>
+                  </span>
+                ) : (
+                  'Save changes'
+                )}
+              </button>
+            </form>
+          </section>
+
+          <section className="section">
+            <header>
+              <h2>Connected accounts</h2>
+              <p>Link a Google account for quicker sign-in and calendar integrations.</p>
+            </header>
+
+            <div className="connected-card">
+              <div>
+                <h3>Google</h3>
+                <p>{googleIdentity ? 'Google account linked.' : 'No Google account linked yet.'}</p>
+              </div>
+              <div className="connected-actions">
+                {googleIdentity ? (
+                  <button className="outline-btn" onClick={handleUnlinkGoogle} disabled={linking}>
+                    {linking ? 'Disconnecting…' : 'Disconnect Google'}
+                  </button>
+                ) : (
+                  <button className="primary-btn" onClick={handleLinkGoogle} disabled={linking}>
+                    {linking ? 'Opening…' : 'Link Google account'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </section>
+        </>
+      )}
 
       <style jsx>{`
         .settings-tab {
@@ -299,6 +408,15 @@ const SettingsTab = ({ user, supabase }) => {
           display: flex;
           flex-direction: column;
           gap: var(--space-5);
+        }
+
+        .loading-state {
+          background: var(--white);
+          border: 1px solid var(--gray-200);
+          border-radius: var(--radius-2xl);
+          padding: var(--space-6);
+          display: flex;
+          justify-content: center;
         }
 
         .section header h2 {

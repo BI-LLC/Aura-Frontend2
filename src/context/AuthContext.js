@@ -471,6 +471,7 @@ export const AuthProvider = ({ children }) => {
     changePassword,
     resetPassword,
     clearError,
+    logout: signOut,
     
     // Utilities
     hasRole,

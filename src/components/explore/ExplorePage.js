@@ -84,8 +84,7 @@ const ExplorePage = () => {
             last_updated
           )
         `)
-        .eq('role', 'user')
-        .eq('is_active', true);
+        .eq('role', 'user');
 
       if (usersError) {
         throw usersError;
@@ -102,28 +101,33 @@ const ExplorePage = () => {
       }
 
       // Process the data to match our chatbot format
-      const processedChatbots = users.map(user => {
+      const processedChatbots = (users || []).map(user => {
         const userStats = stats?.filter(stat => stat.user_id === user.user_id) || [];
         const totalChats = userStats.length;
         const persona = user.user_personas;
         const preferences = user.user_preferences;
-        
-        // Generate slug from name
-        const slug = user.name.toLowerCase()
+
+        const displayName = user.name?.trim() || user.email?.split('@')[0] || 'Aura Assistant';
+
+        // Generate slug from display name
+        const slug = displayName.toLowerCase()
           .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-+|-+$/g, '');
+          .replace(/^-+|-+$/g, '') || 'aura-assistant';
 
         // Generate avatar initials
-        const avatar = user.name
+        const avatar = displayName
           .split(' ')
+          .filter(Boolean)
           .map(word => word.charAt(0))
           .join('')
           .toUpperCase()
-          .substring(0, 2);
+          .substring(0, 2) || 'AA';
 
         // Determine category based on expertise areas
         let category = 'business'; // default
-        const expertiseAreas = preferences?.expertise_areas || [];
+        const expertiseAreas = Array.isArray(preferences?.expertise_areas)
+          ? preferences.expertise_areas
+          : [];
         if (expertiseAreas.includes('healthcare') || expertiseAreas.includes('medical')) {
           category = 'healthcare';
         } else if (expertiseAreas.includes('technology') || expertiseAreas.includes('tech')) {
@@ -155,15 +159,15 @@ const ExplorePage = () => {
 
         return {
           id: user.user_id,
-          name: user.name,
+          name: displayName,
           slug: slug,
-          title: `${user.name.split(' ')[0]}'s AI Assistant`,
+          title: `${displayName.split(' ')[0]}'s AI Assistant`,
           category: category,
           description: description,
           avatar: avatar,
           rating: parseFloat(rating.toFixed(1)),
           totalChats: totalChats,
-          tags: expertiseAreas.slice(0, 3).map(tag => 
+          tags: expertiseAreas.slice(0, 3).map(tag =>
             tag.charAt(0).toUpperCase() + tag.slice(1)
           ),
           isVerified: user.role === 'owner' || totalChats > 50,

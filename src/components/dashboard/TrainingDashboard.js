@@ -1,8 +1,21 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import LoadingSpinner from '../common/LoadingSpinner';
 import Alert from '../common/Alert';
 
 const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) => {
+  const LOGIC_NOTE_CATEGORIES = useMemo(
+    () => [
+      { value: 'general', label: 'General Guidance' },
+      { value: 'personality', label: 'Personality & Tone' },
+      { value: 'knowledge', label: 'Knowledge Base' },
+      { value: 'behavior', label: 'Behavior Rules' },
+      { value: 'compliance', label: 'Compliance & Safety' },
+      { value: 'escalation', label: 'Escalation' }
+    ],
+    []
+  );
+
+  const defaultLogicCategory = LOGIC_NOTE_CATEGORIES[0].value;
   const [activeTab, setActiveTab] = useState('qa');
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
@@ -10,6 +23,26 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
   const [trainingData, setTrainingData] = useState([]);
   const [referenceMaterials, setReferenceMaterials] = useState([]);
   const [logicNotes, setLogicNotes] = useState([]);
+
+  const logicCategories = useMemo(() => {
+    const baseCategories = [...LOGIC_NOTE_CATEGORIES];
+    const seen = new Set(baseCategories.map(category => category.value));
+
+    logicNotes
+      .map(note => note.category)
+      .filter(Boolean)
+      .forEach(category => {
+        if (!seen.has(category)) {
+          seen.add(category);
+          baseCategories.push({
+            value: category,
+            label: category.charAt(0).toUpperCase() + category.slice(1)
+          });
+        }
+      });
+
+    return baseCategories;
+  }, [LOGIC_NOTE_CATEGORIES, logicNotes]);
 
   const [isQADialogOpen, setIsQADialogOpen] = useState(false);
   const [isLogicDialogOpen, setIsLogicDialogOpen] = useState(false);
@@ -21,7 +54,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
   const [qaTagInput, setQATagInput] = useState('');
   const [qaSaving, setQASaving] = useState(false);
 
-  const [logicFormData, setLogicFormData] = useState({ title: '', content: '', category: 'general', tags: [] });
+  const [logicFormData, setLogicFormData] = useState({ title: '', content: '', category: defaultLogicCategory, tags: [] });
   const [logicTagInput, setLogicTagInput] = useState('');
   const [logicSaving, setLogicSaving] = useState(false);
 
@@ -176,12 +209,12 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       setLogicFormData({
         title: item.title || '',
         content: item.content || '',
-        category: item.category || 'general',
+        category: item.category || defaultLogicCategory,
         tags: Array.isArray(item.tags) ? item.tags : []
       });
     } else {
       setEditingLogicItem(null);
-      setLogicFormData({ title: '', content: '', category: 'general', tags: [] });
+      setLogicFormData({ title: '', content: '', category: defaultLogicCategory, tags: [] });
     }
     setLogicTagInput('');
     setIsLogicDialogOpen(true);
@@ -197,7 +230,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
   const closeLogicDialog = () => {
     setIsLogicDialogOpen(false);
     setEditingLogicItem(null);
-    setLogicFormData({ title: '', content: '', category: 'general', tags: [] });
+    setLogicFormData({ title: '', content: '', category: defaultLogicCategory, tags: [] });
     setLogicTagInput('');
   };
 
@@ -321,7 +354,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       const payload = {
         title: logicFormData.title.trim(),
         content: logicFormData.content.trim(),
-        category: logicFormData.category.trim() || 'general',
+        category: (logicFormData.category || defaultLogicCategory).toString(),
         tags: logicFormData.tags
       };
 
@@ -907,12 +940,16 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
               </label>
               <label>
                 <span>Category</span>
-                <input
-                  type="text"
+                <select
                   value={logicFormData.category}
                   onChange={event => setLogicFormData(prev => ({ ...prev, category: event.target.value }))}
-                  placeholder="e.g., personality, knowledge, behavior"
-                />
+                >
+                  {logicCategories.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 <span>Content</span>
@@ -1139,6 +1176,8 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
           font-weight: var(--font-weight-medium);
           border: none;
           transition: background var(--transition-fast), color var(--transition-fast);
+          position: relative;
+          overflow: hidden;
         }
 
         .btn.primary {
@@ -1169,6 +1208,19 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
           inset: 0;
           opacity: 0;
           cursor: pointer;
+          width: 100%;
+          height: 100%;
+        }
+
+        .btn.disabled input[type='file'] {
+          pointer-events: none;
+        }
+
+        select {
+          border: 1px solid var(--gray-300);
+          border-radius: var(--radius-md);
+          padding: var(--space-3);
+          font-size: var(--text-base);
         }
 
         .table-container {

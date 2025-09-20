@@ -21,6 +21,7 @@ import SettingsTab from './SettingsTab';
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user, supabase, signOut } = useAuth();
+  const userId = user?.id || user?.user_id || null;
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -42,25 +43,25 @@ const Dashboard = () => {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      if (!supabase || !user) return;
+      if (!supabase || !userId) return;
 
       // Fetch conversation stats
       const { data: conversations } = await supabase
         .from('conversation_summaries')
         .select('session_id')
-        .eq('user_id', user.user_id);
+        .eq('user_id', userId);
 
       // Fetch documents
       const { data: documents } = await supabase
         .from('documents')
         .select('doc_id')
-        .eq('user_id', user.user_id);
+        .eq('user_id', userId);
 
       // Fetch recent activity from conversation summaries
       const { data: activity } = await supabase
         .from('conversation_summaries')
         .select('session_id, created_at, summary')
-        .eq('user_id', user.user_id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(5);
 
