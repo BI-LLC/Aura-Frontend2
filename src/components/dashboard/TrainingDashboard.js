@@ -1,243 +1,972 @@
-// TrainingDashboard.js - Complete AI Training Management Component
-// ==================================================================
-// Handles all training content: Q&A pairs, document uploads, and logic notes
-// Integrated with Supabase and your existing backend
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import LoadingSpinner from '../common/LoadingSpinner';
 import Alert from '../common/Alert';
 
-const TrainingDashboard = ({ user, supabase, dashboardData, updateDashboardData, onRefresh }) => {
-  const [activeTab, setActiveTab] = useState('manual');
+const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) => {
+  const [activeTab, setActiveTab] = useState('qa');
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
 
-  // Training data state
-  const [qaPairs, setQaPairs] = useState([]);
-  const [documents, setDocuments] = useState([]);
+  const [trainingData, setTrainingData] = useState([]);
+  const [referenceMaterials, setReferenceMaterials] = useState([]);
   const [logicNotes, setLogicNotes] = useState([]);
-  
-  // Modals state
-  const [showQAModal, setShowQAModal] = useState(false);
-  const [showLogicModal, setShowLogicModal] = useState(false);
 
-  // Load training data when component mounts or tab changes
-  useEffect(() => {
-    fetchTrainingData();
-  }, [activeTab, user]);
+  const [isQADialogOpen, setIsQADialogOpen] = useState(false);
+  const [isLogicDialogOpen, setIsLogicDialogOpen] = useState(false);
 
-  /**
-   * Show alert message
-   */
-  const showAlert = (message, type = 'info') => {
+  const [editingQAItem, setEditingQAItem] = useState(null);
+  const [editingLogicItem, setEditingLogicItem] = useState(null);
+
+  const [qaFormData, setQAFormData] = useState({ prompt: '', response: '', tags: [] });
+  const [qaTagInput, setQATagInput] = useState('');
+  const [qaSaving, setQASaving] = useState(false);
+
+  const [logicFormData, setLogicFormData] = useState({ title: '', content: '', category: 'general', tags: [] });
+  const [logicTagInput, setLogicTagInput] = useState('');
+  const [logicSaving, setLogicSaving] = useState(false);
+
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  const alertTimeoutRef = useRef(null);
+
+  const userId = user?.user_id || user?.id || null;
+
+  const showAlert = useCallback((message, type = 'info') => {
+    if (alertTimeoutRef.current) {
+      clearTimeout(alertTimeoutRef.current);
+    }
     setAlert({ message, type });
-    setTimeout(() => setAlert(null), 5000);
+    alertTimeoutRef.current = setTimeout(() => setAlert(null), 4000);
+  }, []);
+
+  const fetchAllData = useCallback(
+    async (withLoader = false) => {
+      if (!supabase) return;
+
+      if (withLoader) {
+        setLoading(true);
+      }
+
+      try {
+        const baseTrainingQuery = supabase
+          .from('training_data')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        const baseMaterialsQuery = supabase
+          .from('reference_materials')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        const baseLogicQuery = supabase
+          .from('logic_notes')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        let trainingResult;
+        let materialsResult;
+        let notesResult;
+
+        if (userId) {
+          trainingResult = await baseTrainingQuery.eq('created_by', userId);
+          materialsResult = await baseMaterialsQuery.eq('uploaded_by', userId);
+          notesResult = await baseLogicQuery.eq('created_by', userId);
+
+          if (trainingResult.error) {
+            console.warn('Falling back to all training records:', trainingResult.error?.message || trainingResult.error);
+            trainingResult = await baseTrainingQuery;
+          }
+
+          if (materialsResult.error) {
+            console.warn('Falling back to all reference materials:', materialsResult.error?.message || materialsResult.error);
+            materialsResult = await baseMaterialsQuery;
+          }
+
+          if (notesResult.error) {
+            console.warn('Falling back to all logic notes:', notesResult.error?.message || notesResult.error);
+            notesResult = await baseLogicQuery;
+          }
+        } else {
+          [trainingResult, materialsResult, notesResult] = await Promise.all([
+            baseTrainingQuery,
+            baseMaterialsQuery,
+            baseLogicQuery
+          ]);
+        }
+
+        if (trainingResult.error) throw trainingResult.error;
+        if (materialsResult.error) throw materialsResult.error;
+        if (notesResult.error) throw notesResult.error;
+
+        const trainingItems = (trainingResult.data || []).map(item => ({
+          ...item,
+          tags: Array.isArray(item.tags) ? item.tags : []
+        }));
+        const materialItems = (materialsResult.data || []).map(item => ({
+          ...item,
+          tags: Array.isArray(item.tags) ? item.tags : []
+        }));
+        const logicItems = (notesResult.data || []).map(item => ({
+          ...item,
+          tags: Array.isArray(item.tags) ? item.tags : [],
+          category: item.category || 'general'
+        }));
+
+        setTrainingData(trainingItems);
+        setReferenceMaterials(materialItems);
+        setLogicNotes(logicItems);
+
+        const aggregateTags = new Set();
+        trainingItems.forEach(item => item.tags?.forEach(tag => aggregateTags.add(tag)));
+        materialItems.forEach(item => item.tags?.forEach(tag => aggregateTags.add(tag)));
+        logicItems.forEach(item => item.tags?.forEach(tag => aggregateTags.add(tag)));
+
+        if (updateDashboardData) {
+          updateDashboardData({
+            totalQAPairs: trainingItems.length,
+            totalDocuments: materialItems.length,
+            totalLogicNotes: logicItems.length,
+            uniqueTagCount: aggregateTags.size
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load training data:', error);
+        showAlert('Failed to load training data from Supabase.', 'error');
+      } finally {
+        if (withLoader) {
+          setLoading(false);
+        }
+      }
+    },
+    [supabase, updateDashboardData, showAlert, userId]
+  );
+
+  useEffect(() => {
+    fetchAllData(true);
+  }, [fetchAllData]);
+
+  useEffect(() => {
+    return () => {
+      if (alertTimeoutRef.current) {
+        clearTimeout(alertTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleQADialogOpen = (item = null) => {
+    if (item) {
+      setEditingQAItem(item);
+      setQAFormData({
+        prompt: item.prompt || '',
+        response: item.response || '',
+        tags: Array.isArray(item.tags) ? item.tags : []
+      });
+    } else {
+      setEditingQAItem(null);
+      setQAFormData({ prompt: '', response: '', tags: [] });
+    }
+    setQATagInput('');
+    setIsQADialogOpen(true);
   };
 
-  /**
-   * Fetch training data based on active tab
-   */
-  const fetchTrainingData = async () => {
-    if (!supabase || !user) return;
-    
-    setLoading(true);
+  const handleLogicDialogOpen = (item = null) => {
+    if (item) {
+      setEditingLogicItem(item);
+      setLogicFormData({
+        title: item.title || '',
+        content: item.content || '',
+        category: item.category || 'general',
+        tags: Array.isArray(item.tags) ? item.tags : []
+      });
+    } else {
+      setEditingLogicItem(null);
+      setLogicFormData({ title: '', content: '', category: 'general', tags: [] });
+    }
+    setLogicTagInput('');
+    setIsLogicDialogOpen(true);
+  };
+
+  const closeQADialog = () => {
+    setIsQADialogOpen(false);
+    setEditingQAItem(null);
+    setQAFormData({ prompt: '', response: '', tags: [] });
+    setQATagInput('');
+  };
+
+  const closeLogicDialog = () => {
+    setIsLogicDialogOpen(false);
+    setEditingLogicItem(null);
+    setLogicFormData({ title: '', content: '', category: 'general', tags: [] });
+    setLogicTagInput('');
+  };
+
+  const addQATag = () => {
+    const value = qaTagInput.trim();
+    if (!value || qaFormData.tags.includes(value)) return;
+    setQAFormData(prev => ({ ...prev, tags: [...prev.tags, value] }));
+    setQATagInput('');
+  };
+
+  const removeQATag = (tagToRemove) => {
+    setQAFormData(prev => ({
+      ...prev,
+      tags: prev.tags.filter(tag => tag !== tagToRemove)
+    }));
+  };
+
+  const addLogicTag = () => {
+    const value = logicTagInput.trim();
+    if (!value || logicFormData.tags.includes(value)) return;
+    setLogicFormData(prev => ({ ...prev, tags: [...prev.tags, value] }));
+    setLogicTagInput('');
+  };
+
+  const removeLogicTag = (tagToRemove) => {
+    setLogicFormData(prev => ({
+      ...prev,
+      tags: prev.tags.filter(tag => tag !== tagToRemove)
+    }));
+  };
+
+  const handleQASave = async () => {
+    if (!supabase) {
+      showAlert('Supabase client is not available.', 'error');
+      return;
+    }
+
+    if (!qaFormData.prompt.trim() || !qaFormData.response.trim()) {
+      showAlert('Prompt and response are required.', 'error');
+      return;
+    }
+
+    setQASaving(true);
+
     try {
-      if (activeTab === 'manual') {
-        // Fetch Q&A pairs - you can create a table for this or use existing structure
-        // For now using mock data, but you can create a 'qa_pairs' table
-        setQaPairs([
-          { 
-            id: 1, 
-            prompt: 'What services do you offer?', 
-            response: 'I offer voice AI assistance and consulting services.', 
-            tags: ['general', 'services'], 
-            created_at: '2024-01-15T10:00:00Z'
-          },
-          {
-            id: 2,
-            prompt: 'How can I contact support?',
-            response: 'You can reach our support team through the contact form or email support@aura.ai',
-            tags: ['support', 'contact'],
-            created_at: '2024-01-16T14:30:00Z'
-          }
-        ]);
-        
-        // Update dashboard data
-        updateDashboardData({ totalQAPairs: 2 });
-        
-      } else if (activeTab === 'upload') {
-        // Fetch documents from your existing documents table
-        const { data: docs, error } = await supabase
-          .from('documents')
-          .select('*')
-          .eq('user_id', user.user_id)
-          .order('upload_time', { ascending: false });
-        
+      const payload = {
+        prompt: qaFormData.prompt.trim(),
+        response: qaFormData.response.trim(),
+        tags: qaFormData.tags
+      };
+
+      if (editingQAItem?.id) {
+        const { error } = await supabase
+          .from('training_data')
+          .update({ ...payload, updated_at: new Date().toISOString() })
+          .eq('id', editingQAItem.id);
+
         if (error) throw error;
-        setDocuments(docs || []);
-        
-      } else if (activeTab === 'logic') {
-        // Fetch logic notes - you can create a table for this
-        // For now using mock data, but you can create a 'logic_notes' table
-        setLogicNotes([
-          { 
-            id: 1, 
-            title: 'General Guidelines', 
-            content: 'Always be professional and helpful. Maintain a friendly tone while providing accurate information.', 
-            category: 'general',
-            created_at: '2024-01-15T10:00:00Z'
-          },
-          {
-            id: 2,
-            title: 'Voice Response Rules',
-            content: 'Keep voice responses concise and natural. Avoid overly technical language unless specifically requested.',
-            category: 'voice',
-            created_at: '2024-01-16T09:15:00Z'
-          }
-        ]);
-        
-        // Update dashboard data
-        updateDashboardData({ totalLogicNotes: 2 });
+        showAlert('Q&A pair updated successfully.', 'success');
+      } else {
+        const { error } = await supabase
+          .from('training_data')
+          .insert([{ ...payload, created_by: userId }]);
+
+        if (error) throw error;
+        showAlert('Q&A pair added successfully.', 'success');
+      }
+
+      closeQADialog();
+      await fetchAllData();
+      if (onRefresh) {
+        onRefresh();
       }
     } catch (error) {
-      console.error('Error fetching training data:', error);
-      showAlert('Failed to load training data', 'error');
+      console.error('Failed to save Q&A pair:', error);
+      showAlert('Failed to save Q&A data.', 'error');
     } finally {
-      setLoading(false);
+      setQASaving(false);
     }
   };
 
-  const trainingTabs = [
-    { id: 'manual', label: 'Manual Training (Q&A Format)', icon: '💬' },
-    { id: 'upload', label: 'Upload Reference Materials', icon: '📄' },
-    { id: 'logic', label: 'Logic Notes', icon: '🧠' }
+  const handleQADelete = async (id) => {
+    if (!supabase) {
+      showAlert('Supabase client is not available.', 'error');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('training_data')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      showAlert('Q&A pair deleted.', 'success');
+      await fetchAllData();
+      if (onRefresh) {
+        onRefresh();
+      }
+    } catch (error) {
+      console.error('Failed to delete Q&A pair:', error);
+      showAlert('Failed to delete Q&A data.', 'error');
+    }
+  };
+
+  const handleLogicSave = async () => {
+    if (!supabase) {
+      showAlert('Supabase client is not available.', 'error');
+      return;
+    }
+
+    if (!logicFormData.title.trim() || !logicFormData.content.trim()) {
+      showAlert('Title and content are required.', 'error');
+      return;
+    }
+
+    setLogicSaving(true);
+
+    try {
+      const payload = {
+        title: logicFormData.title.trim(),
+        content: logicFormData.content.trim(),
+        category: logicFormData.category.trim() || 'general',
+        tags: logicFormData.tags
+      };
+
+      if (editingLogicItem?.id) {
+        const { error } = await supabase
+          .from('logic_notes')
+          .update({ ...payload, updated_at: new Date().toISOString() })
+          .eq('id', editingLogicItem.id);
+
+        if (error) throw error;
+        showAlert('Logic note updated successfully.', 'success');
+      } else {
+        const { error } = await supabase
+          .from('logic_notes')
+          .insert([{ ...payload, created_by: userId }]);
+
+        if (error) throw error;
+        showAlert('Logic note added successfully.', 'success');
+      }
+
+      closeLogicDialog();
+      await fetchAllData();
+      if (onRefresh) {
+        onRefresh();
+      }
+    } catch (error) {
+      console.error('Failed to save logic note:', error);
+      showAlert('Failed to save logic note.', 'error');
+    } finally {
+      setLogicSaving(false);
+    }
+  };
+
+  const handleLogicDelete = async (id) => {
+    if (!supabase) {
+      showAlert('Supabase client is not available.', 'error');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('logic_notes')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      showAlert('Logic note deleted.', 'success');
+      await fetchAllData();
+      if (onRefresh) {
+        onRefresh();
+      }
+    } catch (error) {
+      console.error('Failed to delete logic note:', error);
+      showAlert('Failed to delete logic note.', 'error');
+    }
+  };
+
+  const handleFileUpload = async (event) => {
+    if (!supabase) {
+      showAlert('Supabase client is not available.', 'error');
+      return;
+    }
+
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    const allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'text/markdown'];
+
+    if (!allowedTypes.includes(file.type)) {
+      showAlert('Only PDF, DOCX, TXT, and MD files are allowed.', 'error');
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    try {
+      const storagePath = `${userId || 'admin'}/${Date.now()}-${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from('reference-materials')
+        .upload(storagePath, file, { upsert: false });
+
+      if (uploadError) throw uploadError;
+
+      setUploadProgress(60);
+
+      let content = '';
+      if (file.type === 'text/plain' || file.type === 'text/markdown') {
+        content = await file.text();
+      }
+
+      const { error: dbError } = await supabase
+        .from('reference_materials')
+        .insert([
+          {
+            filename: storagePath,
+            original_filename: file.name,
+            file_type: file.type,
+            file_size: file.size,
+            content,
+            uploaded_by: userId
+          }
+        ]);
+
+      if (dbError) throw dbError;
+
+      setUploadProgress(100);
+      showAlert('File uploaded successfully.', 'success');
+      await fetchAllData();
+      if (onRefresh) {
+        onRefresh();
+      }
+    } catch (error) {
+      console.error('Failed to upload file:', error);
+      showAlert('Failed to upload file.', 'error');
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+      event.target.value = '';
+    }
+  };
+
+  const handleDeleteMaterial = async (material) => {
+    if (!supabase) {
+      showAlert('Supabase client is not available.', 'error');
+      return;
+    }
+
+    try {
+      const { error: storageError } = await supabase.storage
+        .from('reference-materials')
+        .remove([material.filename]);
+
+      if (storageError) throw storageError;
+
+      const { error: dbError } = await supabase
+        .from('reference_materials')
+        .delete()
+        .eq('id', material.id);
+
+      if (dbError) throw dbError;
+
+      showAlert('Reference material deleted.', 'success');
+      await fetchAllData();
+      if (onRefresh) {
+        onRefresh();
+      }
+    } catch (error) {
+      console.error('Failed to delete reference material:', error);
+      showAlert('Failed to delete reference material.', 'error');
+    }
+  };
+
+  const formatDate = (value) => {
+    if (!value) return '—';
+    try {
+      return new Date(value).toLocaleDateString();
+    } catch (error) {
+      return value;
+    }
+  };
+
+  const formatNumber = (value) => {
+    if (value === null || value === undefined) return '—';
+    if (value > 999999) return `${(value / 1000000).toFixed(1)}M`;
+    if (value > 999) return `${(value / 1000).toFixed(1)}K`;
+    return value.toString();
+  };
+
+  const formatFileSize = (bytes) => {
+    if (!bytes && bytes !== 0) return '—';
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+    const value = bytes / Math.pow(1024, index);
+    return `${value.toFixed(1)} ${units[index]}`;
+  };
+
+  const totalQAPairs = trainingData.length;
+  const totalReferenceFiles = referenceMaterials.length;
+  const totalLogicNotes = logicNotes.length;
+  const totalKnowledgeItems = totalQAPairs + totalReferenceFiles + totalLogicNotes;
+  const totalFileBytes = referenceMaterials.reduce((acc, item) => acc + (item.file_size || 0), 0);
+  const uniqueTags = new Set([
+    ...trainingData.flatMap(item => item.tags || []),
+    ...referenceMaterials.flatMap(item => item.tags || []),
+    ...logicNotes.flatMap(item => item.tags || [])
+  ]);
+
+  const summaryCards = [
+    {
+      label: 'Q&A Pairs',
+      value: formatNumber(totalQAPairs),
+      helper: 'Manual prompt / response entries',
+      icon: '💬'
+    },
+    {
+      label: 'Reference Files',
+      value: formatNumber(totalReferenceFiles),
+      helper: 'Documents stored in Supabase',
+      icon: '📄'
+    },
+    {
+      label: 'Logic Notes',
+      value: formatNumber(totalLogicNotes),
+      helper: 'Conversation rules & guardrails',
+      icon: '🧠'
+    },
+    {
+      label: 'Unique Tags',
+      value: formatNumber(uniqueTags.size),
+      helper: 'Topics applied across training',
+      icon: '🏷️'
+    }
   ];
+
+  const insightCards = [
+    {
+      title: 'Knowledge Items',
+      value: formatNumber(totalKnowledgeItems),
+      description: 'Combined Q&A pairs, logic notes, and reference files.'
+    },
+    {
+      title: 'File Library Size',
+      value: formatFileSize(totalFileBytes),
+      description: 'Total storage footprint for uploaded materials.'
+    },
+    {
+      title: 'Latest Sync',
+      value: formatDate(
+        [
+          ...trainingData.map(item => item.updated_at || item.created_at),
+          ...referenceMaterials.map(item => item.updated_at || item.created_at),
+          ...logicNotes.map(item => item.updated_at || item.created_at)
+        ]
+          .filter(Boolean)
+          .sort()
+          .pop()
+      ),
+      description: 'Most recent update across any dataset.'
+    }
+  ];
+
+  const renderQATab = () => (
+    <div className="tab-panel">
+      <div className="panel-header">
+        <div>
+          <h3>Question &amp; Answer Pairs</h3>
+          <p>Create specific prompt-response pairs for Aura to learn from.</p>
+        </div>
+        <button className="btn primary" onClick={() => handleQADialogOpen()}>
+          <span className="icon">+</span>
+          Add Q&amp;A Pair
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="panel-loading">
+          <LoadingSpinner size="medium" message="Loading Q&A pairs..." />
+        </div>
+      ) : trainingData.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">💬</div>
+          <h4>No Q&amp;A pairs yet</h4>
+          <p>Click "Add Q&amp;A Pair" to create your first prompt-response pair.</p>
+        </div>
+      ) : (
+        <div className="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Prompt</th>
+                <th>Response</th>
+                <th>Tags</th>
+                <th>Created</th>
+                <th className="actions-col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {trainingData.map(item => (
+                <tr key={item.id}>
+                  <td title={item.prompt}>{item.prompt}</td>
+                  <td title={item.response}>{item.response}</td>
+                  <td>
+                    <div className="tag-list">
+                      {item.tags?.map(tag => (
+                        <span key={tag} className="tag">
+                          {tag}
+                        </span>
+                      ))}
+                      {(!item.tags || item.tags.length === 0) && <span className="muted">No tags</span>}
+                    </div>
+                  </td>
+                  <td>{formatDate(item.created_at)}</td>
+                  <td>
+                    <div className="table-actions">
+                      <button className="icon-btn" onClick={() => handleQADialogOpen(item)} title="Edit">
+                        ✏️
+                      </button>
+                      <button className="icon-btn" onClick={() => handleQADelete(item.id)} title="Delete">
+                        🗑️
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderMaterialsTab = () => (
+    <div className="tab-panel">
+      <div className="panel-header">
+        <div>
+          <h3>Reference Materials</h3>
+          <p>Upload documents for Aura to use as background knowledge (PDF, DOCX, TXT, MD).</p>
+        </div>
+        <label className={`btn primary ${isUploading ? 'disabled' : ''}`}>
+          <input type="file" accept=".pdf,.docx,.txt,.md" onChange={handleFileUpload} disabled={isUploading} />
+          <span className="icon">📁</span>
+          {isUploading ? `Uploading… ${uploadProgress}%` : 'Upload File'}
+        </label>
+      </div>
+
+      {loading ? (
+        <div className="panel-loading">
+          <LoadingSpinner size="medium" message="Loading reference materials..." />
+        </div>
+      ) : referenceMaterials.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">📄</div>
+          <h4>No reference materials yet</h4>
+          <p>Upload documents to build Aura's knowledge base.</p>
+        </div>
+      ) : (
+        <div className="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Filename</th>
+                <th>Type</th>
+                <th>Size</th>
+                <th>Uploaded</th>
+                <th className="actions-col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {referenceMaterials.map(item => (
+                <tr key={item.id}>
+                  <td title={item.original_filename}>{item.original_filename}</td>
+                  <td>{item.file_type?.split('/').pop()?.toUpperCase()}</td>
+                  <td>{formatFileSize(item.file_size)}</td>
+                  <td>{formatDate(item.created_at)}</td>
+                  <td>
+                    <div className="table-actions">
+                      <button className="icon-btn" onClick={() => handleDeleteMaterial(item)} title="Delete">
+                        🗑️
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderLogicTab = () => (
+    <div className="tab-panel">
+      <div className="panel-header">
+        <div>
+          <h3>Logic Notes</h3>
+          <p>Add facts, rules, and guidelines that shape Aura's conversational logic.</p>
+        </div>
+        <button className="btn primary" onClick={() => handleLogicDialogOpen()}>
+          <span className="icon">+</span>
+          Add Logic Note
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="panel-loading">
+          <LoadingSpinner size="medium" message="Loading logic notes..." />
+        </div>
+      ) : logicNotes.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">🧠</div>
+          <h4>No logic notes yet</h4>
+          <p>Define guidance and behavioral rules for Aura.</p>
+        </div>
+      ) : (
+        <div className="logic-grid">
+          {logicNotes.map(item => (
+            <div key={item.id} className="logic-card">
+              <div className="logic-header">
+                <div>
+                  <h4>{item.title}</h4>
+                  <div className="logic-meta">
+                    <span className="tag subtle">{item.category}</span>
+                    <span className="muted">{formatDate(item.created_at)}</span>
+                  </div>
+                </div>
+                <div className="table-actions">
+                  <button className="icon-btn" onClick={() => handleLogicDialogOpen(item)} title="Edit">
+                    ✏️
+                  </button>
+                  <button className="icon-btn" onClick={() => handleLogicDelete(item.id)} title="Delete">
+                    🗑️
+                  </button>
+                </div>
+              </div>
+              <p className="logic-content">{item.content}</p>
+              {item.tags && item.tags.length > 0 && (
+                <div className="tag-list">
+                  {item.tags.map(tag => (
+                    <span key={tag} className="tag">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="training-dashboard">
-      {/* Alert */}
       {alert && (
-        <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />
+        <div className="alert-container">
+          <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />
+        </div>
       )}
 
-      {/* Header */}
-      <div className="training-header">
-        <h2 className="section-title">Training Content</h2>
-        <p className="section-description">
-          Manage different types of training data to enhance Aura's capabilities
-        </p>
-      </div>
-
-      {/* Training Status Overview */}
-      <div className="training-status-overview">
-        <div className="status-card">
-          <div className="status-icon">💬</div>
-          <div className="status-content">
-            <div className="status-number">{dashboardData?.totalQAPairs || qaPairs.length}</div>
-            <div className="status-label">Q&A Pairs</div>
-          </div>
+      <div className="header">
+        <div>
+          <h2>AI Training Content</h2>
+          <p>Keep Aura’s prompts, documents, and logic synchronized with your Supabase tables.</p>
         </div>
-        
-        <div className="status-card">
-          <div className="status-icon">📄</div>
-          <div className="status-content">
-            <div className="status-number">{dashboardData?.totalDocuments || documents.length}</div>
-            <div className="status-label">Documents</div>
-          </div>
-        </div>
-        
-        <div className="status-card">
-          <div className="status-icon">🧠</div>
-          <div className="status-content">
-            <div className="status-number">{dashboardData?.totalLogicNotes || logicNotes.length}</div>
-            <div className="status-label">Logic Notes</div>
-          </div>
-        </div>
-        
-        <div className="status-card accent">
-          <div className="status-icon">⚡</div>
-          <div className="status-content">
-            <div className="status-number">
-              {((dashboardData?.totalQAPairs || 0) + (dashboardData?.totalDocuments || 0) + (dashboardData?.totalLogicNotes || 0)) > 10 ? 'Ready' : 'Training'}
-            </div>
-            <div className="status-label">AI Status</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Tab Navigation */}
-      <div className="training-tabs">
-        {trainingTabs.map(tab => (
+        <div className="header-actions">
           <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`training-tab ${activeTab === tab.id ? 'active' : ''}`}
+            className="btn secondary"
+            onClick={() => fetchAllData(true)}
+            disabled={loading}
           >
-            <span className="tab-icon">{tab.icon}</span>
-            <span className="tab-label">{tab.label}</span>
+            {loading ? 'Refreshing…' : 'Refresh Data'}
           </button>
+        </div>
+      </div>
+
+      <div className="summary-grid">
+        {summaryCards.map(card => (
+          <div key={card.label} className="summary-card">
+            <div className="summary-icon">{card.icon}</div>
+            <div>
+              <div className="summary-value">{card.value}</div>
+              <div className="summary-label">{card.label}</div>
+              <div className="summary-helper">{card.helper}</div>
+            </div>
+          </div>
         ))}
       </div>
 
-      {/* Tab Content */}
-      <div className="tab-content">
-        {activeTab === 'manual' && (
-          <ManualTrainingTab 
-            qaPairs={qaPairs}
-            onAddQA={() => setShowQAModal(true)}
-            onDeleteQA={(id) => {
-              setQaPairs(prev => prev.filter(qa => qa.id !== id));
-              showAlert('Q&A pair deleted', 'success');
-            }}
-            loading={loading}
-          />
-        )}
-        
-        {activeTab === 'upload' && (
-          <UploadMaterialsTab 
-            documents={documents}
-            user={user}
-            supabase={supabase}
-            onRefresh={fetchTrainingData}
-            showAlert={showAlert}
-            loading={loading}
-          />
-        )}
-        
-        {activeTab === 'logic' && (
-          <LogicNotesTab 
-            logicNotes={logicNotes}
-            onAddNote={() => setShowLogicModal(true)}
-            onDeleteNote={(id) => {
-              setLogicNotes(prev => prev.filter(note => note.id !== id));
-              showAlert('Logic note deleted', 'success');
-            }}
-            loading={loading}
-          />
-        )}
+      <div className="insight-grid">
+        {insightCards.map(card => (
+          <div key={card.title} className="insight-card">
+            <h4>{card.title}</h4>
+            <div className="insight-value">{card.value}</div>
+            <p>{card.description}</p>
+          </div>
+        ))}
       </div>
 
-      {/* Modals */}
-      {showQAModal && (
-        <QAModal 
-          onClose={() => setShowQAModal(false)} 
-          onSave={(newQA) => {
-            setQaPairs(prev => [{ ...newQA, id: Date.now() }, ...prev]);
-            setShowQAModal(false);
-            showAlert('Q&A pair added successfully', 'success');
-          }}
-        />
+      <div className="tabs">
+        <button className={`tab-button ${activeTab === 'qa' ? 'active' : ''}`} onClick={() => setActiveTab('qa')}>
+          💬 Manual Training
+        </button>
+        <button className={`tab-button ${activeTab === 'materials' ? 'active' : ''}`} onClick={() => setActiveTab('materials')}>
+          📄 Reference Materials
+        </button>
+        <button className={`tab-button ${activeTab === 'logic' ? 'active' : ''}`} onClick={() => setActiveTab('logic')}>
+          🧠 Logic Notes
+        </button>
+      </div>
+
+      {activeTab === 'qa' && renderQATab()}
+      {activeTab === 'materials' && renderMaterialsTab()}
+      {activeTab === 'logic' && renderLogicTab()}
+
+      {isQADialogOpen && (
+        <div className="modal-overlay" onClick={closeQADialog}>
+          <div className="modal" onClick={event => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{editingQAItem ? 'Edit Q&A Pair' : 'Add Q&A Pair'}</h3>
+              <button className="icon-btn" onClick={closeQADialog}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <label>
+                <span>Prompt / Question</span>
+                <textarea
+                  value={qaFormData.prompt}
+                  onChange={event => setQAFormData(prev => ({ ...prev, prompt: event.target.value }))}
+                  rows={3}
+                  placeholder="Enter the user prompt or question..."
+                />
+              </label>
+              <label>
+                <span>Response</span>
+                <textarea
+                  value={qaFormData.response}
+                  onChange={event => setQAFormData(prev => ({ ...prev, response: event.target.value }))}
+                  rows={4}
+                  placeholder="Enter Aura's response..."
+                />
+              </label>
+              <label>
+                <span>Tags</span>
+                <div className="tag-input">
+                  <input
+                    type="text"
+                    value={qaTagInput}
+                    onChange={event => setQATagInput(event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        addQATag();
+                      }
+                    }}
+                    placeholder="Add a tag and press Enter"
+                  />
+                  <button type="button" className="btn secondary" onClick={addQATag}>
+                    Add Tag
+                  </button>
+                </div>
+              </label>
+              {qaFormData.tags.length > 0 && (
+                <div className="tag-list editable">
+                  {qaFormData.tags.map(tag => (
+                    <span key={tag} className="tag" onClick={() => removeQATag(tag)}>
+                      {tag} ×
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn secondary" onClick={closeQADialog}>
+                Cancel
+              </button>
+              <button className={`btn primary ${qaSaving ? 'disabled' : ''}`} onClick={handleQASave} disabled={qaSaving}>
+                {qaSaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
-      
-      {showLogicModal && (
-        <LogicModal 
-          onClose={() => setShowLogicModal(false)} 
-          onSave={(newNote) => {
-            setLogicNotes(prev => [{ ...newNote, id: Date.now() }, ...prev]);
-            setShowLogicModal(false);
-            showAlert('Logic note added successfully', 'success');
-          }}
-        />
+
+      {isLogicDialogOpen && (
+        <div className="modal-overlay" onClick={closeLogicDialog}>
+          <div className="modal" onClick={event => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{editingLogicItem ? 'Edit Logic Note' : 'Add Logic Note'}</h3>
+              <button className="icon-btn" onClick={closeLogicDialog}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <label>
+                <span>Title</span>
+                <input
+                  type="text"
+                  value={logicFormData.title}
+                  onChange={event => setLogicFormData(prev => ({ ...prev, title: event.target.value }))}
+                  placeholder="Enter note title..."
+                />
+              </label>
+              <label>
+                <span>Category</span>
+                <input
+                  type="text"
+                  value={logicFormData.category}
+                  onChange={event => setLogicFormData(prev => ({ ...prev, category: event.target.value }))}
+                  placeholder="e.g., personality, knowledge, behavior"
+                />
+              </label>
+              <label>
+                <span>Content</span>
+                <textarea
+                  value={logicFormData.content}
+                  onChange={event => setLogicFormData(prev => ({ ...prev, content: event.target.value }))}
+                  rows={6}
+                  placeholder="Enter facts, rules, or guidance for Aura..."
+                />
+              </label>
+              <label>
+                <span>Tags</span>
+                <div className="tag-input">
+                  <input
+                    type="text"
+                    value={logicTagInput}
+                    onChange={event => setLogicTagInput(event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        addLogicTag();
+                      }
+                    }}
+                    placeholder="Add a tag and press Enter"
+                  />
+                  <button type="button" className="btn secondary" onClick={addLogicTag}>
+                    Add Tag
+                  </button>
+                </div>
+              </label>
+              {logicFormData.tags.length > 0 && (
+                <div className="tag-list editable">
+                  {logicFormData.tags.map(tag => (
+                    <span key={tag} className="tag" onClick={() => removeLogicTag(tag)}>
+                      {tag} ×
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn secondary" onClick={closeLogicDialog}>
+                Cancel
+              </button>
+              <button className={`btn primary ${logicSaving ? 'disabled' : ''}`} onClick={handleLogicSave} disabled={logicSaving}>
+                {logicSaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <style jsx>{`
@@ -245,1233 +974,435 @@ const TrainingDashboard = ({ user, supabase, dashboardData, updateDashboardData,
           display: flex;
           flex-direction: column;
           gap: var(--space-6);
-          max-width: 100%;
         }
 
-        .training-header {
-          margin-bottom: var(--space-4);
+        .alert-container {
+          position: sticky;
+          top: var(--space-2);
+          z-index: 10;
         }
 
-        .section-title {
+        .header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: var(--space-6);
+        }
+
+        .header h2 {
           font-size: var(--text-3xl);
-          font-weight: var(--font-weight-bold);
-          color: var(--gray-900);
-          margin-bottom: var(--space-2);
-        }
-
-        .section-description {
-          font-size: var(--text-base);
-          color: var(--gray-600);
-          line-height: 1.6;
-        }
-
-        .training-status-overview {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-          gap: var(--space-4);
-          margin-bottom: var(--space-6);
-        }
-
-        .status-card {
-          background: var(--white);
-          border: 1px solid var(--gray-200);
-          border-radius: var(--radius-xl);
-          padding: var(--space-6);
-          display: flex;
-          align-items: center;
-          gap: var(--space-4);
-          transition: all var(--transition-fast);
-          border-left: 4px solid var(--primary-500);
-        }
-
-        .status-card:hover {
-          transform: translateY(-2px);
-          box-shadow: var(--shadow-md);
-        }
-
-        .status-card.accent {
-          border-left-color: var(--success-500);
-        }
-
-        .status-icon {
-          font-size: 2rem;
-          width: 50px;
-          height: 50px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: var(--gray-50);
-          border-radius: var(--radius-lg);
-        }
-
-        .status-number {
-          font-size: var(--text-2xl);
           font-weight: var(--font-weight-bold);
           color: var(--gray-900);
           margin-bottom: var(--space-1);
         }
 
-        .status-label {
-          font-size: var(--text-sm);
+        .header p {
           color: var(--gray-600);
-          font-weight: var(--font-weight-medium);
+          max-width: 720px;
         }
 
-        .training-tabs {
+        .header-actions {
+          display: flex;
+          align-items: center;
+          gap: var(--space-3);
+        }
+
+        .summary-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: var(--space-4);
+        }
+
+        .summary-card {
+          display: flex;
+          align-items: center;
+          gap: var(--space-3);
+          padding: var(--space-4);
+          border-radius: var(--radius-xl);
+          border: 1px solid var(--gray-200);
+          background: var(--white);
+          box-shadow: var(--shadow-xs);
+        }
+
+        .summary-icon {
+          font-size: 1.75rem;
+        }
+
+        .summary-value {
+          font-size: var(--text-2xl);
+          font-weight: var(--font-weight-semibold);
+          color: var(--gray-900);
+        }
+
+        .summary-label {
+          font-weight: var(--font-weight-medium);
+          color: var(--gray-700);
+        }
+
+        .summary-helper {
+          color: var(--gray-500);
+          font-size: var(--text-sm);
+        }
+
+        .insight-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: var(--space-4);
+        }
+
+        .insight-card {
+          background: var(--white);
+          border: 1px solid var(--gray-200);
+          border-radius: var(--radius-xl);
+          padding: var(--space-4);
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-2);
+        }
+
+        .insight-card h4 {
+          font-size: var(--text-base);
+          font-weight: var(--font-weight-semibold);
+          color: var(--gray-800);
+        }
+
+        .insight-value {
+          font-size: var(--text-xl);
+          font-weight: var(--font-weight-semibold);
+          color: var(--primary-600);
+        }
+
+        .insight-card p {
+          color: var(--gray-600);
+          font-size: var(--text-sm);
+        }
+
+        .tabs {
           display: flex;
           gap: var(--space-2);
           background: var(--gray-100);
           padding: var(--space-1);
           border-radius: var(--radius-lg);
-          margin-bottom: var(--space-6);
         }
 
-        .training-tab {
-          display: flex;
-          align-items: center;
-          gap: var(--space-2);
-          padding: var(--space-3) var(--space-4);
-          border: none;
-          background: none;
-          color: var(--gray-600);
-          font-weight: var(--font-weight-medium);
-          cursor: pointer;
-          border-radius: var(--radius-md);
-          transition: all var(--transition-fast);
+        .tab-button {
           flex: 1;
-          justify-content: center;
-          white-space: nowrap;
+          border: none;
+          background: transparent;
+          padding: var(--space-3) var(--space-4);
+          border-radius: var(--radius-md);
+          font-weight: var(--font-weight-medium);
+          color: var(--gray-600);
+          cursor: pointer;
+          transition: all var(--transition-fast);
         }
 
-        .training-tab:hover {
-          color: var(--gray-900);
-          background: var(--gray-200);
-        }
-
-        .training-tab.active {
-          color: var(--primary-600);
+        .tab-button.active {
           background: var(--white);
+          color: var(--primary-600);
           box-shadow: var(--shadow-sm);
         }
 
-        .tab-content {
-          background: var(--gray-50);
-          border-radius: var(--radius-xl);
-          padding: var(--space-6);
-          min-height: 400px;
-        }
-
-        @media (max-width: 768px) {
-          .training-status-overview {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          
-          .training-tabs {
-            flex-direction: column;
-            gap: var(--space-1);
-          }
-          
-          .training-tab {
-            justify-content: flex-start;
-          }
-          
-          .tab-content {
-            padding: var(--space-4);
-          }
-        }
-
-        @media (max-width: 480px) {
-          .training-status-overview {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
-    </div>
-  );
-};
-
-// Manual Training Tab (Q&A Format)
-const ManualTrainingTab = ({ qaPairs, onAddQA, onDeleteQA, loading }) => {
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  };
-
-  return (
-    <div className="manual-training">
-      <div className="tab-header">
-        <div>
-          <h3 className="tab-title">Question & Answer Pairs</h3>
-          <p className="tab-description">Create specific prompt-response pairs for Aura to learn from</p>
-        </div>
-        <button onClick={onAddQA} className="btn btn-primary">
-          ➕ Add Q&A Pair
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="loading-content">
-          <LoadingSpinner size="medium" message="Loading Q&A pairs..." />
-        </div>
-      ) : (
-        <div className="qa-container">
-          {qaPairs.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-icon">❓</div>
-              <h4>No Q&A pairs yet</h4>
-              <p>Add your first training pair to help Aura learn your communication style!</p>
-              <button onClick={onAddQA} className="btn btn-primary">
-                Add Your First Q&A
-              </button>
-            </div>
-          ) : (
-            <div className="qa-grid">
-              {qaPairs.map(pair => (
-                <div key={pair.id} className="qa-card">
-                  <div className="qa-header">
-                    <div className="qa-tags">
-                      {pair.tags?.map(tag => (
-                        <span key={tag} className="tag">{tag}</span>
-                      ))}
-                    </div>
-                    <div className="qa-actions">
-                      <button className="action-btn edit" title="Edit">✏️</button>
-                      <button 
-                        className="action-btn delete" 
-                        onClick={() => onDeleteQA(pair.id)}
-                        title="Delete"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                  
-                  <div className="qa-content">
-                    <div className="qa-question">
-                      <h5>Question:</h5>
-                      <p>{pair.prompt}</p>
-                    </div>
-                    <div className="qa-answer">
-                      <h5>Answer:</h5>
-                      <p>{pair.response}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="qa-footer">
-                    <span className="qa-date">{formatDate(pair.created_at)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <style jsx>{`
-        .manual-training {
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-6);
-        }
-
-        .tab-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: var(--space-4);
-        }
-
-        .tab-title {
-          font-size: var(--text-xl);
-          font-weight: var(--font-weight-semibold);
-          color: var(--gray-900);
-          margin-bottom: var(--space-1);
-        }
-
-        .tab-description {
-          color: var(--gray-600);
-          font-size: var(--text-sm);
-          line-height: 1.5;
-        }
-
-        .loading-content {
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          min-height: 200px;
-        }
-
-        .qa-container {
+        .tab-panel {
           background: var(--white);
-          border-radius: var(--radius-lg);
           border: 1px solid var(--gray-200);
-          overflow: hidden;
-        }
-
-        .empty-state {
+          border-radius: var(--radius-xl);
+          padding: var(--space-5);
           display: flex;
           flex-direction: column;
+          gap: var(--space-4);
+        }
+
+        .panel-header {
+          display: flex;
+          justify-content: space-between;
+          gap: var(--space-4);
           align-items: center;
-          justify-content: center;
-          padding: var(--space-12);
-          text-align: center;
+          flex-wrap: wrap;
         }
 
-        .empty-icon {
-          font-size: 4rem;
-          margin-bottom: var(--space-4);
-          opacity: 0.5;
-        }
-
-        .empty-state h4 {
+        .panel-header h3 {
           font-size: var(--text-xl);
           font-weight: var(--font-weight-semibold);
           color: var(--gray-900);
-          margin-bottom: var(--space-2);
         }
 
-        .empty-state p {
+        .panel-header p {
           color: var(--gray-600);
-          margin-bottom: var(--space-6);
-          max-width: 400px;
+          margin-top: var(--space-1);
+          max-width: 520px;
         }
 
-        .qa-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-          gap: var(--space-4);
-          padding: var(--space-4);
+        .btn {
+          display: inline-flex;
+          align-items: center;
+          gap: var(--space-2);
+          border-radius: var(--radius-md);
+          padding: var(--space-2) var(--space-4);
+          cursor: pointer;
+          font-weight: var(--font-weight-medium);
+          border: none;
+          transition: background var(--transition-fast), color var(--transition-fast);
         }
 
-        .qa-card {
+        .btn.primary {
+          background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+          color: var(--white);
+        }
+
+        .btn.primary.disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
+        .btn.secondary {
+          background: var(--gray-100);
+          color: var(--gray-700);
+        }
+
+        .btn.secondary:hover {
+          background: var(--gray-200);
+        }
+
+        .btn.primary:hover:not(.disabled) {
+          background: linear-gradient(135deg, var(--primary-600), var(--primary-700));
+        }
+
+        .btn input[type='file'] {
+          position: absolute;
+          inset: 0;
+          opacity: 0;
+          cursor: pointer;
+        }
+
+        .table-container {
+          overflow-x: auto;
+        }
+
+        table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+
+        th,
+        td {
+          text-align: left;
+          padding: var(--space-3);
+          border-bottom: 1px solid var(--gray-200);
+          vertical-align: top;
+        }
+
+        th {
+          font-weight: var(--font-weight-semibold);
+          font-size: var(--text-sm);
+          color: var(--gray-600);
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
           background: var(--gray-50);
-          border: 1px solid var(--gray-200);
-          border-radius: var(--radius-lg);
-          padding: var(--space-4);
-          transition: all var(--transition-fast);
         }
 
-        .qa-card:hover {
-          box-shadow: var(--shadow-md);
-          transform: translateY(-2px);
+        .actions-col {
+          width: 120px;
         }
 
-        .qa-header {
+        .table-actions {
           display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          margin-bottom: var(--space-3);
+          gap: var(--space-2);
         }
 
-        .qa-tags {
+        .icon-btn {
+          border: none;
+          background: var(--gray-100);
+          padding: var(--space-2);
+          border-radius: var(--radius-md);
+          cursor: pointer;
+        }
+
+        .icon-btn:hover {
+          background: var(--gray-200);
+        }
+
+        .tag-list {
           display: flex;
           flex-wrap: wrap;
-          gap: var(--space-1);
+          gap: var(--space-2);
+        }
+
+        .tag-list.editable .tag {
+          cursor: pointer;
         }
 
         .tag {
-          background: var(--primary-100);
-          color: var(--primary-700);
-          padding: var(--space-1) var(--space-2);
-          border-radius: var(--radius-sm);
-          font-size: var(--text-xs);
-          font-weight: var(--font-weight-medium);
-        }
-
-        .qa-actions {
-          display: flex;
-          gap: var(--space-1);
-        }
-
-        .action-btn {
-          background: none;
-          border: none;
-          cursor: pointer;
-          padding: var(--space-1);
-          border-radius: var(--radius-sm);
-          transition: all var(--transition-fast);
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          background: var(--gray-100);
+          padding: 4px 10px;
+          border-radius: 999px;
           font-size: var(--text-sm);
         }
 
-        .action-btn:hover {
-          background: var(--gray-200);
-        }
-
-        .action-btn.delete:hover {
-          background: var(--error-100);
-        }
-
-        .qa-content {
-          margin-bottom: var(--space-4);
-        }
-
-        .qa-question,
-        .qa-answer {
-          margin-bottom: var(--space-3);
-        }
-
-        .qa-question h5,
-        .qa-answer h5 {
-          font-size: var(--text-sm);
-          font-weight: var(--font-weight-semibold);
-          color: var(--gray-700);
-          margin-bottom: var(--space-1);
-        }
-
-        .qa-question p,
-        .qa-answer p {
-          color: var(--gray-900);
-          line-height: 1.6;
-          margin: 0;
-        }
-
-        .qa-footer {
-          padding-top: var(--space-3);
-          border-top: 1px solid var(--gray-200);
-        }
-
-        .qa-date {
-          color: var(--gray-500);
-          font-size: var(--text-xs);
-        }
-
-        @media (max-width: 768px) {
-          .tab-header {
-            flex-direction: column;
-            align-items: stretch;
-          }
-          
-          .qa-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
-    </div>
-  );
-};
-
-// Upload Materials Tab (from your original code, enhanced)
-const UploadMaterialsTab = ({ documents, user, supabase, onRefresh, showAlert, loading }) => {
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef(null);
-
-  const handleFileUpload = async (event) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    setUploading(true);
-    try {
-      for (const file of files) {
-        // Validate file type and size
-        const allowedTypes = ['.pdf', '.docx', '.txt', '.md'];
-        const isValidType = allowedTypes.some(type => 
-          file.name.toLowerCase().endsWith(type)
-        );
-        
-        if (!isValidType) {
-          showAlert(`${file.name}: Invalid file type. Allowed: PDF, DOCX, TXT, MD`, 'error');
-          continue;
-        }
-        
-        if (file.size > 10 * 1024 * 1024) { // 10MB limit
-          showAlert(`${file.name}: File too large. Max size: 10MB`, 'error');
-          continue;
-        }
-
-        // Upload to Supabase storage
-        const fileName = `${user.user_id}/${Date.now()}_${file.name}`;
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('documents')
-          .upload(fileName, file);
-
-        if (uploadError) throw uploadError;
-
-        // Insert document record
-        const { error: insertError } = await supabase
-          .from('documents')
-          .insert({
-            user_id: user.user_id,
-            tenant_id: user.tenant_id,
-            filename: file.name,
-            file_type: file.type,
-            file_size: file.size,
-            file_path: uploadData.path,
-            processing_status: 'pending'
-          });
-
-        if (insertError) throw insertError;
-      }
-      
-      showAlert('Files uploaded successfully', 'success');
-      onRefresh();
-    } catch (error) {
-      console.error('Upload error:', error);
-      showAlert('Failed to upload files. Please try again.', 'error');
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    }
-  };
-
-  const formatFileSize = (bytes) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  const getFileIcon = (filename) => {
-    const ext = filename.toLowerCase().split('.').pop();
-    switch (ext) {
-      case 'pdf': return '📕';
-      case 'docx': case 'doc': return '📘';
-      case 'txt': return '📄';
-      case 'md': return '📝';
-      default: return '📄';
-    }
-  };
-
-  return (
-    <div className="upload-materials">
-      <div className="tab-header">
-        <div>
-          <h3 className="tab-title">Reference Materials</h3>
-          <p className="tab-description">Upload documents for Aura to use as background knowledge</p>
-        </div>
-        <div className="upload-controls">
-          <input
-            type="file"
-            ref={fileInputRef}
-            multiple
-            accept=".pdf,.docx,.txt,.md"
-            onChange={handleFileUpload}
-            style={{ display: 'none' }}
-            disabled={uploading}
-          />
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="btn btn-primary"
-            disabled={uploading}
-          >
-            {uploading ? (
-              <>
-                <LoadingSpinner size="small" />
-                Uploading...
-              </>
-            ) : (
-              <>📁 Upload Files</>
-            )}
-          </button>
-        </div>
-      </div>
-
-      <div className="upload-info">
-        <div className="info-card">
-          <h4>Supported Formats</h4>
-          <p>PDF, DOCX, TXT, MD files up to 10MB each</p>
-        </div>
-        <div className="info-card">
-          <h4>Processing</h4>
-          <p>Files are automatically processed and made searchable</p>
-        </div>
-        <div className="info-card">
-          <h4>Usage</h4>
-          <p>Aura will reference these documents when answering questions</p>
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="loading-content">
-          <LoadingSpinner size="medium" message="Loading documents..." />
-        </div>
-      ) : (
-        <div className="documents-container">
-          {documents.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-icon">📄</div>
-              <h4>No documents uploaded yet</h4>
-              <p>Upload your first reference material to enhance Aura's knowledge base!</p>
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="btn btn-primary"
-              >
-                Upload Your First Document
-              </button>
-            </div>
-          ) : (
-            <div className="documents-grid">
-              {documents.map(doc => (
-                <div key={doc.doc_id} className="document-card">
-                  <div className="doc-header">
-                    <div className="doc-icon">{getFileIcon(doc.filename)}</div>
-                    <div className="doc-actions">
-                      <button 
-                        className="action-btn delete"
-                        title="Delete document"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                  
-                  <div className="doc-content">
-                    <h5 className="doc-name">{doc.filename}</h5>
-                    <div className="doc-meta">
-                      <span className="doc-size">{formatFileSize(doc.file_size || 0)}</span>
-                      <span className="doc-date">
-                        {new Date(doc.upload_time).toLocaleDateString()}
-                      </span>
-                    </div>
-                  </div>
-                  
-                  <div className="doc-status">
-                    <span className={`status-badge ${doc.processing_status || 'pending'}`}>
-                      {doc.processing_status || 'Pending'}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <style jsx>{`
-        .upload-materials {
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-6);
-        }
-
-        .tab-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: var(--space-4);
-        }
-
-        .tab-title {
-          font-size: var(--text-xl);
-          font-weight: var(--font-weight-semibold);
-          color: var(--gray-900);
-          margin-bottom: var(--space-1);
-        }
-
-        .tab-description {
-          color: var(--gray-600);
-          font-size: var(--text-sm);
-          line-height: 1.5;
-        }
-
-        .upload-info {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-          gap: var(--space-4);
-          margin-bottom: var(--space-4);
-        }
-
-        .info-card {
+        .tag.subtle {
           background: var(--primary-50);
-          border: 1px solid var(--primary-200);
-          border-radius: var(--radius-lg);
-          padding: var(--space-4);
+          color: var(--primary-600);
         }
 
-        .info-card h4 {
-          font-size: var(--text-sm);
-          font-weight: var(--font-weight-semibold);
-          color: var(--primary-900);
-          margin-bottom: var(--space-1);
-        }
-
-        .info-card p {
-          font-size: var(--text-xs);
-          color: var(--primary-700);
-          margin: 0;
-        }
-
-        .documents-container {
-          background: var(--white);
-          border-radius: var(--radius-lg);
-          border: 1px solid var(--gray-200);
-          overflow: hidden;
-        }
-
-        .empty-state {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          padding: var(--space-12);
-          text-align: center;
-        }
-
-        .empty-icon {
-          font-size: 4rem;
-          margin-bottom: var(--space-4);
-          opacity: 0.5;
-        }
-
-        .empty-state h4 {
-          font-size: var(--text-xl);
-          font-weight: var(--font-weight-semibold);
-          color: var(--gray-900);
-          margin-bottom: var(--space-2);
-        }
-
-        .empty-state p {
-          color: var(--gray-600);
-          margin-bottom: var(--space-6);
-          max-width: 400px;
-        }
-
-        .documents-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-          gap: var(--space-4);
-          padding: var(--space-4);
-        }
-
-        .document-card {
-          background: var(--gray-50);
-          border: 1px solid var(--gray-200);
-          border-radius: var(--radius-lg);
-          padding: var(--space-4);
-          transition: all var(--transition-fast);
-        }
-
-        .document-card:hover {
-          box-shadow: var(--shadow-md);
-          transform: translateY(-2px);
-        }
-
-        .doc-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: var(--space-3);
-        }
-
-        .doc-icon {
-          font-size: 2rem;
-        }
-
-        .doc-content {
-          margin-bottom: var(--space-3);
-        }
-
-        .doc-name {
-          font-size: var(--text-base);
-          font-weight: var(--font-weight-semibold);
-          color: var(--gray-900);
-          margin-bottom: var(--space-2);
-          word-break: break-word;
-        }
-
-        .doc-meta {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          font-size: var(--text-xs);
+        .muted {
           color: var(--gray-500);
-        }
-
-        .doc-status {
-          padding-top: var(--space-3);
-          border-top: 1px solid var(--gray-200);
-        }
-
-        .status-badge {
-          padding: var(--space-1) var(--space-2);
-          border-radius: var(--radius-sm);
-          font-size: var(--text-xs);
-          font-weight: var(--font-weight-medium);
-          text-transform: capitalize;
-        }
-
-        .status-badge.pending {
-          background: var(--warning-100);
-          color: var(--warning-700);
-        }
-
-        .status-badge.completed {
-          background: var(--success-100);
-          color: var(--success-700);
-        }
-
-        .status-badge.failed {
-          background: var(--error-100);
-          color: var(--error-700);
-        }
-
-        .action-btn {
-          background: none;
-          border: none;
-          cursor: pointer;
-          padding: var(--space-1);
-          border-radius: var(--radius-sm);
-          transition: all var(--transition-fast);
           font-size: var(--text-sm);
-        }
-
-        .action-btn:hover {
-          background: var(--gray-200);
-        }
-
-        .action-btn.delete:hover {
-          background: var(--error-100);
-        }
-
-        @media (max-width: 768px) {
-          .tab-header {
-            flex-direction: column;
-            align-items: stretch;
-          }
-          
-          .upload-info {
-            grid-template-columns: 1fr;
-          }
-          
-          .documents-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
-    </div>
-  );
-};
-
-// Logic Notes Tab (from your original code, enhanced)
-const LogicNotesTab = ({ logicNotes, onAddNote, onDeleteNote, loading }) => {
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  };
-
-  const getCategoryColor = (category) => {
-    const colors = {
-      general: 'primary',
-      voice: 'success',
-      behavior: 'warning',
-      knowledge: 'info'
-    };
-    return colors[category] || 'primary';
-  };
-
-  return (
-    <div className="logic-notes">
-      <div className="tab-header">
-        <div>
-          <h3 className="tab-title">Logic Notes</h3>
-          <p className="tab-description">Add facts, rules, and guidance for Aura's conversational logic</p>
-        </div>
-        <button onClick={onAddNote} className="btn btn-primary">
-          ➕ Add Logic Note
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="loading-content">
-          <LoadingSpinner size="medium" message="Loading logic notes..." />
-        </div>
-      ) : (
-        <div className="notes-container">
-          {logicNotes.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-icon">🧠</div>
-              <h4>No logic notes yet</h4>
-              <p>Add your first guidance note to shape Aura's conversational behavior!</p>
-              <button onClick={onAddNote} className="btn btn-primary">
-                Add Your First Logic Note
-              </button>
-            </div>
-          ) : (
-            <div className="notes-grid">
-              {logicNotes.map(note => (
-                <div key={note.id} className="note-card">
-                  <div className="note-header">
-                    <div className="note-category">
-                      <span className={`category-badge ${getCategoryColor(note.category)}`}>
-                        {note.category}
-                      </span>
-                    </div>
-                    <div className="note-actions">
-                      <button className="action-btn edit" title="Edit">✏️</button>
-                      <button 
-                        className="action-btn delete" 
-                        onClick={() => onDeleteNote(note.id)}
-                        title="Delete"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                  
-                  <div className="note-content">
-                    <h4 className="note-title">{note.title}</h4>
-                    <p className="note-text">{note.content}</p>
-                  </div>
-                  
-                  <div className="note-footer">
-                    <span className="note-date">{formatDate(note.created_at)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <style jsx>{`
-        .logic-notes {
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-6);
-        }
-
-        .tab-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: var(--space-4);
-        }
-
-        .tab-title {
-          font-size: var(--text-xl);
-          font-weight: var(--font-weight-semibold);
-          color: var(--gray-900);
-          margin-bottom: var(--space-1);
-        }
-
-        .tab-description {
-          color: var(--gray-600);
-          font-size: var(--text-sm);
-          line-height: 1.5;
-        }
-
-        .notes-container {
-          background: var(--white);
-          border-radius: var(--radius-lg);
-          border: 1px solid var(--gray-200);
-          overflow: hidden;
         }
 
         .empty-state {
+          text-align: center;
+          padding: var(--space-12) var(--space-4);
+          color: var(--gray-600);
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
-          padding: var(--space-12);
-          text-align: center;
+          gap: var(--space-2);
         }
 
         .empty-icon {
-          font-size: 4rem;
-          margin-bottom: var(--space-4);
-          opacity: 0.5;
-        }
-
-        .empty-state h4 {
-          font-size: var(--text-xl);
-          font-weight: var(--font-weight-semibold);
-          color: var(--gray-900);
+          font-size: 3rem;
           margin-bottom: var(--space-2);
         }
 
-        .empty-state p {
-          color: var(--gray-600);
-          margin-bottom: var(--space-6);
-          max-width: 400px;
+        .panel-loading {
+          display: flex;
+          justify-content: center;
+          padding: var(--space-10) 0;
         }
 
-        .notes-grid {
+        .logic-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
           gap: var(--space-4);
-          padding: var(--space-4);
         }
 
-        .note-card {
-          background: var(--gray-50);
+        .logic-card {
           border: 1px solid var(--gray-200);
           border-radius: var(--radius-lg);
           padding: var(--space-4);
-          transition: all var(--transition-fast);
+          background: var(--gray-50);
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-3);
         }
 
-        .note-card:hover {
-          box-shadow: var(--shadow-md);
-          transform: translateY(-2px);
-        }
-
-        .note-header {
+        .logic-header {
           display: flex;
           justify-content: space-between;
+          gap: var(--space-4);
           align-items: flex-start;
-          margin-bottom: var(--space-3);
         }
 
-        .category-badge {
-          padding: var(--space-1) var(--space-2);
-          border-radius: var(--radius-sm);
-          font-size: var(--text-xs);
-          font-weight: var(--font-weight-medium);
-          text-transform: capitalize;
-        }
-
-        .category-badge.primary {
-          background: var(--primary-100);
-          color: var(--primary-700);
-        }
-
-        .category-badge.success {
-          background: var(--success-100);
-          color: var(--success-700);
-        }
-
-        .category-badge.warning {
-          background: var(--warning-100);
-          color: var(--warning-700);
-        }
-
-        .category-badge.info {
-          background: var(--info-100);
-          color: var(--info-700);
-        }
-
-        .note-actions {
+        .logic-meta {
           display: flex;
-          gap: var(--space-1);
+          gap: var(--space-3);
+          align-items: center;
+          margin-top: var(--space-1);
         }
 
-        .action-btn {
-          background: none;
-          border: none;
-          cursor: pointer;
-          padding: var(--space-1);
-          border-radius: var(--radius-sm);
-          transition: all var(--transition-fast);
-          font-size: var(--text-sm);
-        }
-
-        .action-btn:hover {
-          background: var(--gray-200);
-        }
-
-        .action-btn.delete:hover {
-          background: var(--error-100);
-        }
-
-        .note-content {
-          margin-bottom: var(--space-4);
-        }
-
-        .note-title {
-          font-size: var(--text-base);
-          font-weight: var(--font-weight-semibold);
-          color: var(--gray-900);
-          margin-bottom: var(--space-2);
-        }
-
-        .note-text {
+        .logic-content {
+          white-space: pre-wrap;
           color: var(--gray-700);
-          font-size: var(--text-sm);
-          line-height: 1.6;
-          margin: 0;
         }
 
-        .note-footer {
-          padding-top: var(--space-3);
+        .modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(17, 24, 39, 0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: var(--space-4);
+        }
+
+        .modal {
+          background: var(--white);
+          border-radius: var(--radius-xl);
+          max-width: 640px;
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          max-height: 90vh;
+        }
+
+        .modal-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: var(--space-4) var(--space-5);
+          border-bottom: 1px solid var(--gray-200);
+        }
+
+        .modal-body {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-4);
+          padding: var(--space-5);
+          overflow-y: auto;
+        }
+
+        .modal-body label {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-2);
+          font-weight: var(--font-weight-medium);
+          color: var(--gray-700);
+        }
+
+        .modal-body textarea,
+        .modal-body input {
+          border: 1px solid var(--gray-300);
+          border-radius: var(--radius-md);
+          padding: var(--space-3);
+          font-size: var(--text-base);
+        }
+
+        .tag-input {
+          display: flex;
+          gap: var(--space-2);
+        }
+
+        .modal-footer {
+          display: flex;
+          justify-content: flex-end;
+          gap: var(--space-3);
+          padding: var(--space-4) var(--space-5);
           border-top: 1px solid var(--gray-200);
         }
 
-        .note-date {
-          color: var(--gray-500);
-          font-size: var(--text-xs);
+        @media (max-width: 768px) {
+          .header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+
+          .summary-grid,
+          .insight-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .tabs {
+            flex-direction: column;
+          }
+
+          .tab-button {
+            width: 100%;
+          }
+
+          .panel-header {
+            align-items: flex-start;
+          }
         }
 
-        @media (max-width: 768px) {
-          .tab-header {
-            flex-direction: column;
-            align-items: stretch;
-          }
-          
-          .notes-grid {
-            grid-template-columns: 1fr;
+        @media (max-width: 540px) {
+          .modal {
+            max-width: 100%;
           }
         }
       `}</style>
-    </div>
-  );
-};
-
-// Enhanced Modal Components
-const QAModal = ({ onClose, onSave }) => {
-  const [formData, setFormData] = useState({
-    prompt: '',
-    response: '',
-    tags: ''
-  });
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!formData.prompt.trim() || !formData.response.trim()) return;
-
-    const newQA = {
-      prompt: formData.prompt.trim(),
-      response: formData.response.trim(),
-      tags: formData.tags.split(',').map(tag => tag.trim()).filter(Boolean),
-      created_at: new Date().toISOString()
-    };
-
-    onSave(newQA);
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>Add New Q&A Pair</h3>
-          <button onClick={onClose} className="modal-close">×</button>
-        </div>
-        
-        <form onSubmit={handleSubmit} className="modal-form">
-          <div className="form-group">
-            <label htmlFor="prompt">Question/Prompt</label>
-            <textarea
-              id="prompt"
-              value={formData.prompt}
-              onChange={(e) => setFormData(prev => ({ ...prev, prompt: e.target.value }))}
-              placeholder="Enter the question or prompt..."
-              rows={3}
-              required
-            />
-          </div>
-          
-          <div className="form-group">
-            <label htmlFor="response">Response</label>
-            <textarea
-              id="response"
-              value={formData.response}
-              onChange={(e) => setFormData(prev => ({ ...prev, response: e.target.value }))}
-              placeholder="Enter the desired response..."
-              rows={4}
-              required
-            />
-          </div>
-          
-          <div className="form-group">
-            <label htmlFor="tags">Tags (comma-separated)</label>
-            <input
-              type="text"
-              id="tags"
-              value={formData.tags}
-              onChange={(e) => setFormData(prev => ({ ...prev, tags: e.target.value }))}
-              placeholder="e.g., general, support, product"
-            />
-          </div>
-          
-          <div className="modal-actions">
-            <button type="button" onClick={onClose} className="btn btn-secondary">
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary">
-              Save Q&A Pair
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-const LogicModal = ({ onClose, onSave }) => {
-  const [formData, setFormData] = useState({
-    title: '',
-    content: '',
-    category: 'general'
-  });
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!formData.title.trim() || !formData.content.trim()) return;
-
-    const newNote = {
-      title: formData.title.trim(),
-      content: formData.content.trim(),
-      category: formData.category,
-      created_at: new Date().toISOString()
-    };
-
-    onSave(newNote);
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>Add New Logic Note</h3>
-          <button onClick={onClose} className="modal-close">×</button>
-        </div>
-        
-        <form onSubmit={handleSubmit} className="modal-form">
-          <div className="form-group">
-            <label htmlFor="title">Title</label>
-            <input
-              type="text"
-              id="title"
-              value={formData.title}
-              onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-              placeholder="Enter a descriptive title..."
-              required
-            />
-          </div>
-          
-          <div className="form-group">
-            <label htmlFor="category">Category</label>
-            <select
-              id="category"
-              value={formData.category}
-              onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-            >
-              <option value="general">General</option>
-              <option value="voice">Voice</option>
-              <option value="behavior">Behavior</option>
-              <option value="knowledge">Knowledge</option>
-            </select>
-          </div>
-          
-          <div className="form-group">
-            <label htmlFor="content">Content</label>
-            <textarea
-              id="content"
-              value={formData.content}
-              onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
-              placeholder="Enter the logic note content..."
-              rows={5}
-              required
-            />
-          </div>
-          
-          <div className="modal-actions">
-            <button type="button" onClick={onClose} className="btn btn-secondary">
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary">
-              Save Logic Note
-            </button>
-          </div>
-        </form>
-      </div>
     </div>
   );
 };
