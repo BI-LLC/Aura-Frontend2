@@ -337,11 +337,14 @@ export const AuthProvider = ({ children }) => {
 
       if (error) {
         console.error('Sign out error:', error);
+        return { success: false, error: error.message };
       }
 
       if (isDebugMode) {
         console.log('Sign out successful');
       }
+
+      dispatch({ type: ActionTypes.SET_UNAUTHENTICATED });
 
       return { success: true };
     } catch (error) {

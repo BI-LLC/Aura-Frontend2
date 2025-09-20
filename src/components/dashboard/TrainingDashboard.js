@@ -62,6 +62,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const alertTimeoutRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const userId = user?.user_id || user?.id || null;
 
@@ -487,6 +488,11 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
     }
   };
 
+  const handleOpenFileDialog = () => {
+    if (isUploading) return;
+    fileInputRef.current?.click();
+  };
+
   const handleDeleteMaterial = async (material) => {
     if (!supabase) {
       showAlert('Supabase client is not available.', 'error');
@@ -680,11 +686,24 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
           <h3>Reference Materials</h3>
           <p>Upload documents for Aura to use as background knowledge (PDF, DOCX, TXT, MD).</p>
         </div>
-        <label className={`btn primary ${isUploading ? 'disabled' : ''}`}>
-          <input type="file" accept=".pdf,.docx,.txt,.md" onChange={handleFileUpload} disabled={isUploading} />
-          <span className="icon" aria-hidden="true">File</span>
-          {isUploading ? `Uploading… ${uploadProgress}%` : 'Upload File'}
-        </label>
+        <div className="upload-actions">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx,.txt,.md"
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
+          />
+          <button
+            type="button"
+            className={`btn primary ${isUploading ? 'disabled' : ''}`}
+            onClick={handleOpenFileDialog}
+            disabled={isUploading}
+          >
+            <span className="icon" aria-hidden="true">File</span>
+            {isUploading ? `Uploading… ${uploadProgress}%` : 'Upload File'}
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -1163,6 +1182,11 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
           color: var(--gray-600);
           margin-top: var(--space-1);
           max-width: 520px;
+        }
+
+        .upload-actions {
+          display: inline-flex;
+          align-items: center;
         }
 
         .btn {

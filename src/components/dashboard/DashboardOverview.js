@@ -135,15 +135,15 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
         ) : (
           <div className="activity-list">
             {recentActivity.map((entry) => (
-              <div key={entry.session_id || entry.created_at} className="activity-item">
+              <div key={entry.session_id || entry.timestamp} className="activity-item">
                 <div className="activity-content">
                   <p className="activity-summary">{entry.summary || 'Conversation summary not available.'}</p>
                   <span className="activity-meta">
-                    Session {entry.session_id || '—'} · {formatRelativeTime(entry.created_at)}
+                    Session {entry.session_id || '—'} · {formatRelativeTime(entry.timestamp || entry.created_at)}
                   </span>
                 </div>
                 <div className="activity-date">
-                  {entry.created_at ? new Date(entry.created_at).toLocaleString() : '—'}
+                  {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : entry.created_at ? new Date(entry.created_at).toLocaleString() : '—'}
                 </div>
               </div>
             ))}

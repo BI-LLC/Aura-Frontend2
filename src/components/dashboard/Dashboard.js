@@ -36,41 +36,49 @@ const Dashboard = () => {
     recentActivity: []
   });
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
-      if (!supabase || !userId) return;
+      if (!supabase || !userId) {
+        setLoading(false);
+        return;
+      }
 
       // Fetch conversation stats
-      const { data: conversations } = await supabase
+      const { data: conversations, error: conversationsError } = await supabase
         .from('conversation_summaries')
         .select('session_id')
         .eq('user_id', userId);
 
+      if (conversationsError) throw conversationsError;
+
       // Fetch documents
-      const { data: documents } = await supabase
+      const { data: documents, error: documentsError } = await supabase
         .from('documents')
         .select('doc_id')
         .eq('user_id', userId);
 
+      if (documentsError) throw documentsError;
+
       // Fetch recent activity from conversation summaries
-      const { data: activity } = await supabase
+      const { data: activity, error: activityError } = await supabase
         .from('conversation_summaries')
-        .select('session_id, created_at, summary')
+        .select('session_id, summary, key_topics, timestamp')
         .eq('user_id', userId)
-        .order('created_at', { ascending: false })
+        .order('timestamp', { ascending: false })
         .limit(5);
+
+      if (activityError) throw activityError;
 
       setDashboardData({
         totalConversations: conversations?.length || 0,
         totalDocuments: documents?.length || 0,
         totalQAPairs: 0, // Will be updated by TrainingDashboard
         totalLogicNotes: 0, // Will be updated by TrainingDashboard
-        recentActivity: activity || []
+        recentActivity: (activity || []).map(item => ({
+          ...item,
+          timestamp: item.timestamp || null
+        }))
       });
     } catch (err) {
       setError('Failed to load dashboard data');
@@ -78,7 +86,11 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [supabase, userId]);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   // Update dashboard data from child components
   const updateDashboardData = useCallback((updates) => {
