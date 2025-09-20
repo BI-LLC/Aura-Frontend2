@@ -38,7 +38,7 @@ const NotFound = () => (
   <div className="not-found-page">
     <div className="container">
       <div className="not-found-content">
-        <div className="not-found-icon">🤖</div>
+        <div className="not-found-icon" aria-hidden="true">404</div>
         <h1>404 - Page Not Found</h1>
         <p>The page you're looking for doesn't exist or has been moved.</p>
         <div className="not-found-actions">
@@ -52,7 +52,7 @@ const NotFound = () => (
             onClick={() => window.location.href = '/'}
             className="btn btn-primary"
           >
-            🏠 Go Home
+            Go Home
           </button>
         </div>
       </div>
@@ -65,10 +65,10 @@ function App() {
   // Initialize app and log startup info
   useEffect(() => {
     if (isDebugMode) {
-      console.log('🎤 Aura Voice AI App Started');
-      console.log('🌐 Environment:', process.env.REACT_APP_ENVIRONMENT);
-      console.log('🔗 API URL:', process.env.REACT_APP_API_BASE_URL);
-      console.log('📊 Debug Mode:', isDebugMode);
+      console.log('Aura Voice AI App Started');
+      console.log('Environment:', process.env.REACT_APP_ENVIRONMENT);
+      console.log('API URL:', process.env.REACT_APP_API_BASE_URL);
+      console.log('Debug Mode:', isDebugMode);
     }
 
     // Set up global app behaviors
@@ -86,12 +86,12 @@ function App() {
 
     // Handle online/offline status
     const handleOnline = () => {
-      if (isDebugMode) console.log('🌐 App is online');
+      if (isDebugMode) console.log('App is online');
       document.body.classList.remove('app-offline');
     };
 
     const handleOffline = () => {
-      if (isDebugMode) console.log('📡 App is offline');
+      if (isDebugMode) console.log('App is offline');
       document.body.classList.add('app-offline');
     };
 
@@ -122,7 +122,7 @@ function App() {
           {/* Offline status indicator */}
           <div className="offline-indicator">
             <div className="offline-message">
-              📡 You're offline. Some features may not work properly.
+              You're offline. Some features may not work properly.
             </div>
           </div>
 
@@ -194,7 +194,7 @@ function App() {
             <div className="container">
               <div className="footer-content">
                 <div className="footer-left">
-                  <span className="footer-logo">🎤 Aura Voice AI</span>
+                  <span className="footer-logo">Aura Voice AI</span>
                   <span className="footer-version">v{process.env.REACT_APP_VERSION}</span>
                 </div>
                 <div className="footer-right">
@@ -210,7 +210,7 @@ function App() {
           {isDevelopment && (
             <div className="dev-tools">
               <div className="dev-info">
-                <span>🔧 Dev Mode</span>
+                <span>Dev Mode</span>
                 <span>API: {process.env.REACT_APP_API_BASE_URL}</span>
               </div>
             </div>

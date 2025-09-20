@@ -517,26 +517,22 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
     {
       label: 'Q&A Pairs',
       value: formatNumber(totalQAPairs),
-      helper: 'Manual prompt / response entries',
-      icon: '💬'
+      helper: 'Manual prompt / response entries'
     },
     {
       label: 'Reference Files',
       value: formatNumber(totalReferenceFiles),
-      helper: 'Documents stored in Supabase',
-      icon: '📄'
+      helper: 'Documents stored in Supabase'
     },
     {
       label: 'Logic Notes',
       value: formatNumber(totalLogicNotes),
-      helper: 'Conversation rules & guardrails',
-      icon: '🧠'
+      helper: 'Conversation rules & guardrails'
     },
     {
       label: 'Unique Tags',
       value: formatNumber(uniqueTags.size),
-      helper: 'Topics applied across training',
-      icon: '🏷️'
+      helper: 'Topics applied across training'
     }
   ];
 
@@ -586,7 +582,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         </div>
       ) : trainingData.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon">💬</div>
+          <div className="empty-icon" aria-hidden="true">Q&amp;A</div>
           <h4>No Q&amp;A pairs yet</h4>
           <p>Click "Add Q&amp;A Pair" to create your first prompt-response pair.</p>
         </div>
@@ -621,10 +617,10 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
                   <td>
                     <div className="table-actions">
                       <button className="icon-btn" onClick={() => handleQADialogOpen(item)} title="Edit">
-                        ✏️
+                        Edit
                       </button>
                       <button className="icon-btn" onClick={() => handleQADelete(item.id)} title="Delete">
-                        🗑️
+                        Delete
                       </button>
                     </div>
                   </td>
@@ -646,7 +642,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         </div>
         <label className={`btn primary ${isUploading ? 'disabled' : ''}`}>
           <input type="file" accept=".pdf,.docx,.txt,.md" onChange={handleFileUpload} disabled={isUploading} />
-          <span className="icon">📁</span>
+          <span className="icon" aria-hidden="true">File</span>
           {isUploading ? `Uploading… ${uploadProgress}%` : 'Upload File'}
         </label>
       </div>
@@ -657,7 +653,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         </div>
       ) : referenceMaterials.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon">📄</div>
+          <div className="empty-icon" aria-hidden="true">Docs</div>
           <h4>No reference materials yet</h4>
           <p>Upload documents to build Aura's knowledge base.</p>
         </div>
@@ -683,7 +679,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
                   <td>
                     <div className="table-actions">
                       <button className="icon-btn" onClick={() => handleDeleteMaterial(item)} title="Delete">
-                        🗑️
+                        Delete
                       </button>
                     </div>
                   </td>
@@ -715,7 +711,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         </div>
       ) : logicNotes.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon">🧠</div>
+          <div className="empty-icon" aria-hidden="true">Logic</div>
           <h4>No logic notes yet</h4>
           <p>Define guidance and behavioral rules for Aura.</p>
         </div>
@@ -733,10 +729,10 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
                 </div>
                 <div className="table-actions">
                   <button className="icon-btn" onClick={() => handleLogicDialogOpen(item)} title="Edit">
-                    ✏️
+                    Edit
                   </button>
                   <button className="icon-btn" onClick={() => handleLogicDelete(item.id)} title="Delete">
-                    🗑️
+                    Delete
                   </button>
                 </div>
               </div>
@@ -784,7 +780,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       <div className="summary-grid">
         {summaryCards.map(card => (
           <div key={card.label} className="summary-card">
-            <div className="summary-icon">{card.icon}</div>
+            <div className="summary-icon" aria-hidden="true">{card.label.charAt(0)}</div>
             <div>
               <div className="summary-value">{card.value}</div>
               <div className="summary-label">{card.label}</div>
@@ -806,13 +802,13 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
 
       <div className="tabs">
         <button className={`tab-button ${activeTab === 'qa' ? 'active' : ''}`} onClick={() => setActiveTab('qa')}>
-          💬 Manual Training
+          Manual Training
         </button>
         <button className={`tab-button ${activeTab === 'materials' ? 'active' : ''}`} onClick={() => setActiveTab('materials')}>
-          📄 Reference Materials
+          Reference Materials
         </button>
         <button className={`tab-button ${activeTab === 'logic' ? 'active' : ''}`} onClick={() => setActiveTab('logic')}>
-          🧠 Logic Notes
+          Logic Notes
         </button>
       </div>
 

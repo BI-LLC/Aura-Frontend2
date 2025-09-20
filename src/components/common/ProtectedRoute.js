@@ -150,7 +150,7 @@ const UnauthorizedAccess = ({ requiredRoles, userRole }) => (
               onClick={() => window.location.href = '/'}
               className="btn btn-primary w-full"
             >
-              🏠 Go Home
+              Go Home
             </button>
           </div>
         </div>
@@ -253,14 +253,14 @@ const EmailVerificationRequired = () => {
                     Sending...
                   </>
                 ) : (
-                  '📧 Resend Verification Email'
+                  'Resend Verification Email'
                 )}
               </button>
               <button
                 onClick={() => window.location.href = '/'}
                 className="btn btn-secondary w-full"
               >
-                🏠 Go Home
+                Go Home
               </button>
             </div>
             

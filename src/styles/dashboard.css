@@ -388,8 +388,9 @@
 }
 
 .tip-item::before {
-  content: '💡';
-  font-size: 16px;
+  content: 'Tip';
+  font-size: 14px;
+  font-weight: 600;
   flex-shrink: 0;
   margin-top: 2px;
 }

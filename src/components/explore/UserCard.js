@@ -49,20 +49,11 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
   };
 
   /**
-   * Get personality emoji based on personality type
+   * Format personality label for display
    */
-  const getPersonalityEmoji = (personality) => {
-    const emojiMap = {
-      friendly: '😊',
-      professional: '💼',
-      creative: '🎨',
-      technical: '🔧',
-      casual: '😎',
-      energetic: '⚡',
-      calm: '🧘',
-      witty: '😄'
-    };
-    return emojiMap[personality] || '🤖';
+  const getPersonalityLabel = (personality) => {
+    if (!personality) return 'Personality';
+    return personality.charAt(0).toUpperCase() + personality.slice(1);
   };
 
   /**
@@ -141,12 +132,12 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
         </div>
 
         <div className="card-actions">
-          <button 
+          <button
             className="chat-btn primary"
             onClick={handleChatClick}
             title="Start chat"
           >
-            💬
+            Chat
           </button>
         </div>
       </div>
@@ -195,7 +186,7 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
           <div className="name-section">
             <h3>{userData.name}</h3>
             <span className="personality-indicator">
-              {getPersonalityEmoji(userData.personality)}
+              {getPersonalityLabel(userData.personality)}
             </span>
           </div>
           
@@ -205,7 +196,7 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
             <span className="online-status">{formatLastActive()}</span>
             {userData.voiceEnabled && (
               <span className="voice-enabled" title="Voice chat available">
-                🎤
+                Voice
               </span>
             )}
           </div>
@@ -264,7 +255,6 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
             className="btn primary"
             onClick={handleChatClick}
           >
-            <span>💬</span>
             Start Chat
           </button>
         </div>

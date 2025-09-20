@@ -93,7 +93,6 @@ const Navbar = () => {
           <div className="nav-content">
             {/* Logo */}
             <Link to="/" className="logo">
-              <span className="logo-icon">🎤</span>
               <span className="logo-text">Aura</span>
             </Link>
 
@@ -158,15 +157,12 @@ const Navbar = () => {
                       
                       <div className="user-menu-items">
                         <Link to="/dashboard" className="user-menu-item">
-                          <span className="menu-item-icon">📊</span>
                           Dashboard
                         </Link>
                         <Link to="/dashboard" className="user-menu-item">
-                          <span className="menu-item-icon">⚙️</span>
                           Settings
                         </Link>
                         <button onClick={handleLogout} className="user-menu-item logout-item">
-                          <span className="menu-item-icon">🚪</span>
                           Logout
                         </button>
                       </div>
@@ -238,15 +234,12 @@ const Navbar = () => {
                     
                     <div className="mobile-user-actions">
                       <Link to="/dashboard" className="mobile-menu-item">
-                        <span className="menu-item-icon">📊</span>
                         Dashboard
                       </Link>
                       <Link to="/dashboard" className="mobile-menu-item">
-                        <span className="menu-item-icon">⚙️</span>
                         Settings
                       </Link>
                       <button onClick={handleLogout} className="mobile-menu-item logout-item">
-                        <span className="menu-item-icon">🚪</span>
                         Logout
                       </button>
                     </div>
@@ -309,10 +302,6 @@ const Navbar = () => {
 
         .logo:hover {
           transform: scale(1.02);
-        }
-
-        .logo-icon {
-          font-size: var(--text-3xl);
         }
 
         .nav-center {
@@ -504,12 +493,6 @@ const Navbar = () => {
         .user-menu-item.logout-item:hover {
           background-color: var(--error-100);
           color: var(--error-500);
-        }
-
-        .menu-item-icon {
-          font-size: var(--text-lg);
-          width: 20px;
-          text-align: center;
         }
 
         /* Mobile Menu */

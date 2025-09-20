@@ -266,7 +266,7 @@ const ExplorePage = () => {
           {!isAuthenticated && (
             <div className="header-cta">
               <Link to="/register" className="btn btn-primary">
-                🎤 Create Your AI
+                Create Your AI
               </Link>
             </div>
           )}
@@ -351,7 +351,7 @@ const ExplorePage = () => {
             </div>
           ) : filteredAndSortedChatbots.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-icon">🔍</div>
+              <div className="empty-icon" aria-hidden="true">No Results</div>
               <h3 className="empty-title">No AI assistants found</h3>
               <p className="empty-message">
                 Try adjusting your search terms or filters to find what you're looking for.
@@ -635,11 +635,11 @@ const ChatbotCard = ({ chatbot }) => {
       </div>
 
       <div className="card-footer">
-        <Link 
+        <Link
           to={`/chat/${chatbot.slug}`}
           className="btn btn-primary w-full"
         >
-          💬 Start Conversation
+          Start Conversation
         </Link>
       </div>
 

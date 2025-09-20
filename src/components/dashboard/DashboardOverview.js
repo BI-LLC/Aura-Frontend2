@@ -47,26 +47,22 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
     {
       label: 'Conversations',
       value: formatNumber(totalConversations),
-      helper: 'Sessions captured in Supabase',
-      icon: '💬'
+      helper: 'Sessions captured in Supabase'
     },
     {
       label: 'Reference Files',
       value: formatNumber(totalDocuments),
-      helper: 'Documents available for retrieval',
-      icon: '📄'
+      helper: 'Documents available for retrieval'
     },
     {
       label: 'Manual Q&A',
       value: formatNumber(totalQAPairs),
-      helper: 'Prompt / response pairs',
-      icon: '🗂️'
+      helper: 'Prompt / response pairs'
     },
     {
       label: 'Logic Notes',
       value: formatNumber(totalLogicNotes),
-      helper: 'Behavioral rules & guidance',
-      icon: '🧠'
+      helper: 'Behavioral rules & guidance'
     }
   ];
 
@@ -108,7 +104,7 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
       <div className="stats-grid">
         {overviewCards.map((card) => (
           <div key={card.label} className="stat-card">
-            <div className="stat-icon">{card.icon}</div>
+            <div className="stat-icon" aria-hidden="true">{card.label.charAt(0)}</div>
             <div>
               <div className="stat-value">{card.value}</div>
               <div className="stat-label">{card.label}</div>
@@ -135,7 +131,7 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
         </div>
         {recentActivity.length === 0 ? (
           <div className="empty-state">
-            <span className="empty-icon">📭</span>
+            <span className="empty-icon" aria-hidden="true">No Data</span>
             <p>No recent conversations recorded.</p>
             <p className="empty-helper">Start a new session or add training content to see it here.</p>
           </div>

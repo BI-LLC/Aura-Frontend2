@@ -53,7 +53,7 @@ class ErrorBoundary extends React.Component {
           padding: '2rem',
           fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif'
         }}>
-          <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>🎤</div>
+          <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>Aura</div>
           <h1 style={{ fontSize: '2rem', marginBottom: '1rem' }}>
             Oops! Something went wrong
           </h1>
@@ -74,7 +74,7 @@ class ErrorBoundary extends React.Component {
                 transition: 'all 0.3s ease'
               }}
             >
-              🔄 Refresh Page
+              Refresh Page
             </button>
             <button
               onClick={() => window.location.href = '/'}
@@ -89,7 +89,7 @@ class ErrorBoundary extends React.Component {
                 transition: 'all 0.3s ease'
               }}
             >
-              🏠 Go Home
+              Go Home
             </button>
           </div>
           
@@ -105,7 +105,7 @@ class ErrorBoundary extends React.Component {
               fontSize: '0.9rem'
             }}>
               <summary style={{ cursor: 'pointer', marginBottom: '1rem' }}>
-                🐛 Error Details (Development Mode)
+                Error Details (Development Mode)
               </summary>
               <pre style={{ whiteSpace: 'pre-wrap', overflow: 'auto' }}>
                 {this.state.error && this.state.error.toString()}
@@ -130,7 +130,7 @@ function measurePerformance() {
       const perfData = performance.getEntriesByType('navigation')[0];
       
       if (isDebugMode) {
-        console.log('🚀 Performance Metrics:');
+          console.log('Performance Metrics:');
         console.log(`- DOM Content Loaded: ${perfData.domContentLoadedEventEnd - perfData.domContentLoadedEventStart}ms`);
         console.log(`- Page Load Complete: ${perfData.loadEventEnd - perfData.loadEventStart}ms`);
         console.log(`- Total Load Time: ${perfData.loadEventEnd - perfData.fetchStart}ms`);
@@ -147,7 +147,7 @@ function measurePerformance() {
         const lastEntry = entries[entries.length - 1];
         
         if (isDebugMode) {
-          console.log(`📊 LCP: ${lastEntry.startTime}ms`);
+          console.log(`LCP: ${lastEntry.startTime}ms`);
         }
       });
       
@@ -162,7 +162,7 @@ function initializeApp() {
   const container = document.getElementById('root');
   
   if (!container) {
-    console.error('❌ Could not find root element. Make sure your HTML has <div id="root"></div>');
+    console.error('Could not find root element. Make sure your HTML has <div id="root"></div>');
     return;
   }
 
@@ -171,17 +171,17 @@ function initializeApp() {
 
   // Development mode enhancements
   if (isDevelopment) {
-    console.log('🎤 Aura Voice AI - Development Mode');
-    console.log('📊 Debug mode:', isDebugMode);
-    console.log('🔧 Environment variables loaded:', {
+    console.log('Aura Voice AI - Development Mode');
+    console.log('Debug mode:', isDebugMode);
+    console.log('Environment variables loaded:', {
       API_URL: process.env.REACT_APP_API_BASE_URL,
-      SUPABASE_URL: process.env.REACT_APP_SUPABASE_URL ? '✅ Set' : '❌ Missing',
+      SUPABASE_URL: process.env.REACT_APP_SUPABASE_URL ? 'Set' : 'Missing',
       DEBUG_MODE: isDebugMode
     });
 
     // Enable React DevTools profiler
     if (window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
-      console.log('🔍 React DevTools detected');
+      console.log('React DevTools detected');
     }
   }
 
@@ -212,7 +212,7 @@ function initializeApp() {
 
   // Log successful initialization
   if (isDebugMode) {
-    console.log('✅ Aura Voice AI initialized successfully');
+    console.log('Aura Voice AI initialized successfully');
   }
 }
 
@@ -243,10 +243,10 @@ if ('serviceWorker' in navigator && !isDevelopment) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js')
       .then((registration) => {
-        console.log('✅ Service Worker registered:', registration.scope);
+        console.log('Service Worker registered:', registration.scope);
       })
       .catch((registrationError) => {
-        console.log('❌ Service Worker registration failed:', registrationError);
+        console.log('Service Worker registration failed:', registrationError);
       });
   });
 }
@@ -257,7 +257,7 @@ initializeApp();
 // Hot module replacement for development
 if (isDevelopment && module.hot) {
   module.hot.accept('./App', () => {
-    console.log('🔄 Hot reloading App component');
+    console.log('Hot reloading App component');
     initializeApp();
   });
 }

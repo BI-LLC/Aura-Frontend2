@@ -43,11 +43,11 @@ class VoiceService {
 
       // Start recording
       this.mediaRecorder.start(100); // Collect data every 100ms
-      console.log('🎤 Voice recording started');
+      console.log('Voice recording started');
       
       return true;
     } catch (error) {
-      console.error('❌ Error starting recording:', error);
+      console.error('Error starting recording:', error);
       this.isRecording = false;
       return false;
     }
@@ -67,7 +67,7 @@ class VoiceService {
       this.mediaRecorder.onstop = () => {
         const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
         this.cleanup();
-        console.log('🛑 Voice recording stopped');
+        console.log('Voice recording stopped');
         resolve(audioBlob);
       };
 
@@ -107,10 +107,10 @@ class VoiceService {
         },
       });
 
-      console.log('📝 Speech-to-text completed:', response.data.text);
+      console.log('Speech-to-text completed:', response.data.text);
       return response.data.text || '';
     } catch (error) {
-      console.error('❌ Speech-to-text error:', error);
+      console.error('Speech-to-text error:', error);
       return '';
     }
   }
@@ -134,12 +134,12 @@ class VoiceService {
       });
 
       if (response.data.audio_url) {
-        console.log('🔊 Text-to-speech completed');
+        console.log('Text-to-speech completed');
         return response.data.audio_url;
       }
       return null;
     } catch (error) {
-      console.error('❌ Text-to-speech error:', error);
+      console.error('Text-to-speech error:', error);
       return null;
     }
   }
@@ -156,19 +156,19 @@ class VoiceService {
       
       return new Promise((resolve, reject) => {
         audio.onended = () => {
-          console.log('🔊 Audio playback completed');
+          console.log('Audio playback completed');
           resolve();
         };
         
         audio.onerror = (error) => {
-          console.error('❌ Audio playback error:', error);
+      console.error('Audio playback error:', error);
           reject(error);
         };
         
         audio.play();
       });
     } catch (error) {
-      console.error('❌ Error playing audio:', error);
+      console.error('Error playing audio:', error);
       throw error;
     }
   }
@@ -182,7 +182,7 @@ class VoiceService {
    */
   async voiceChat(userSlug, onTranscription = null, onResponse = null) {
     try {
-      console.log('🎤 Starting voice chat with user:', userSlug);
+      console.log('Starting voice chat with user:', userSlug);
 
       // Start recording
       const recordingStarted = await this.startRecording();
@@ -231,7 +231,7 @@ class VoiceService {
         }
       };
     } catch (error) {
-      console.error('❌ Voice chat error:', error);
+      console.error('Voice chat error:', error);
       this.cleanup();
       throw error;
     }
