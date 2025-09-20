@@ -1,260 +1,364 @@
-// DashboardOverview.js - Dashboard Statistics Overview Component
-// Shows user stats, AI performance metrics, and recent activity
+import React, { useMemo } from 'react';
 
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../../hooks/useAuth';
-import { useAPI } from '../../hooks/useAPI';
-import LoadingSpinner from '../common/LoadingSpinner';
+const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
+  const {
+    totalConversations = 0,
+    totalDocuments = 0,
+    totalQAPairs = 0,
+    totalLogicNotes = 0,
+    uniqueTagCount = 0,
+    recentActivity = []
+  } = dashboardData || {};
 
-const DashboardOverview = () => {
-  const { user } = useAuth();
-  const { apiCall, loading } = useAPI();
-  
-  // State for dashboard data
-  const [stats, setStats] = useState({
-    totalChats: 0,
-    voiceMinutes: 0,
-    trainingProgress: 0,
-    responseAccuracy: 0,
-    lastActive: null,
-    weeklyGrowth: 0
-  });
+  const trainingItems = totalQAPairs + totalLogicNotes;
+  const knowledgeSources = totalDocuments;
+  const totalKnowledgeUnits = trainingItems + knowledgeSources;
 
-  const [recentActivity, setRecentActivity] = useState([]);
-  const [error, setError] = useState(null);
+  const trainingCoverage = useMemo(() => {
+    if (totalKnowledgeUnits === 0) return 0;
+    return Math.min(100, Math.round((trainingItems / totalKnowledgeUnits) * 100));
+  }, [trainingItems, totalKnowledgeUnits]);
 
-  // Fetch dashboard data on component mount
-  useEffect(() => {
-    fetchDashboardData();
-  }, [user]);
-
-  /**
-   * Fetch all dashboard statistics from API
-   */
-  const fetchDashboardData = async () => {
+  const formatRelativeTime = (timestamp) => {
+    if (!timestamp) return '—';
     try {
-      setError(null);
-      
-      // Fetch user statistics
-      const statsResponse = await apiCall(`/users/${user.slug}/stats`);
-      if (statsResponse) {
-        setStats({
-          totalChats: statsResponse.total_conversations || 0,
-          voiceMinutes: Math.round(statsResponse.voice_minutes || 0),
-          trainingProgress: statsResponse.training_progress || 0,
-          responseAccuracy: statsResponse.accuracy_score || 0,
-          lastActive: statsResponse.last_active ? new Date(statsResponse.last_active) : null,
-          weeklyGrowth: statsResponse.weekly_growth || 0
-        });
-      }
-
-      // Fetch recent activity
-      const activityResponse = await apiCall(`/users/${user.slug}/activity?limit=5`);
-      if (activityResponse && activityResponse.activities) {
-        setRecentActivity(activityResponse.activities);
-      }
-
+      const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
+      const diff = Date.now() - date.getTime();
+      const minutes = Math.floor(diff / 60000);
+      if (minutes < 1) return 'Just now';
+      if (minutes < 60) return `${minutes}m ago`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours}h ago`;
+      const days = Math.floor(hours / 24);
+      if (days < 7) return `${days}d ago`;
+      return date.toLocaleDateString();
     } catch (error) {
-      console.error('❌ Error fetching dashboard data:', error);
-      setError('Failed to load dashboard data. Please try again.');
+      return '—';
     }
   };
 
-  /**
-   * Format large numbers with K/M suffixes
-   */
-  const formatNumber = (num) => {
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-    return num.toString();
+  const formatNumber = (value) => {
+    if (value > 999999) return `${(value / 1000000).toFixed(1)}M`;
+    if (value > 999) return `${(value / 1000).toFixed(1)}K`;
+    return value.toString();
   };
 
-  /**
-   * Format time relative to now (e.g., "2 hours ago")
-   */
-  const formatTimeAgo = (date) => {
-    if (!date) return 'Never';
-    
-    const now = new Date();
-    const diffMs = now - date;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
+  const overviewCards = [
+    {
+      label: 'Conversations',
+      value: formatNumber(totalConversations),
+      helper: 'Sessions captured in Supabase',
+      icon: '💬'
+    },
+    {
+      label: 'Reference Files',
+      value: formatNumber(totalDocuments),
+      helper: 'Documents available for retrieval',
+      icon: '📄'
+    },
+    {
+      label: 'Manual Q&A',
+      value: formatNumber(totalQAPairs),
+      helper: 'Prompt / response pairs',
+      icon: '🗂️'
+    },
+    {
+      label: 'Logic Notes',
+      value: formatNumber(totalLogicNotes),
+      helper: 'Behavioral rules & guidance',
+      icon: '🧠'
+    }
+  ];
 
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
-  };
-
-  // Loading state
-  if (loading && !stats.totalChats) {
-    return (
-      <div className="dashboard-overview">
-        <LoadingSpinner />
-        <p>Loading dashboard...</p>
-      </div>
-    );
-  }
-
-  // Error state
-  if (error) {
-    return (
-      <div className="dashboard-overview">
-        <div className="error-message">
-          <p>{error}</p>
-          <button onClick={fetchDashboardData} className="retry-btn">
-            Try Again
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const secondaryStats = [
+    {
+      title: 'Knowledge Sources',
+      value: formatNumber(totalKnowledgeUnits),
+      description: 'Combined documents, logic notes, and Q&A items.'
+    },
+    {
+      title: 'Training Coverage',
+      value: `${trainingCoverage}%`,
+      description: 'Share of knowledge coming from curated Q&A and logic.'
+    },
+    {
+      title: 'Unique Tags',
+      value: formatNumber(uniqueTagCount),
+      description: 'Topics used for filtering and retrieval.'
+    }
+  ];
 
   return (
     <div className="dashboard-overview">
-      {/* Header */}
       <div className="overview-header">
-        <h2>Dashboard Overview</h2>
-        <p>Welcome back, {user?.name || 'User'}! Here's how your AI is performing.</p>
+        <div>
+          <h2>Dashboard Overview</h2>
+          <p>
+            Welcome back{user?.user_metadata?.full_name ? `, ${user.user_metadata.full_name.split(' ')[0]}` : ''}! Track your
+            training footprint and recent activity at a glance.
+          </p>
+        </div>
+        {onRefresh && (
+          <button className="refresh-btn" onClick={onRefresh}>
+            Refresh data
+          </button>
+        )}
       </div>
 
-      {/* Main Stats Grid */}
       <div className="stats-grid">
-        {/* Total Conversations */}
-        <div className="stat-card primary">
-          <div className="stat-icon">💬</div>
-          <div className="stat-content">
-            <h3>{formatNumber(stats.totalChats)}</h3>
-            <p>Total Conversations</p>
-            <span className="stat-change positive">
-              +{stats.weeklyGrowth}% this week
-            </span>
-          </div>
-        </div>
-
-        {/* Voice Minutes */}
-        <div className="stat-card secondary">
-          <div className="stat-icon">🎤</div>
-          <div className="stat-content">
-            <h3>{formatNumber(stats.voiceMinutes)}</h3>
-            <p>Voice Minutes</p>
-            <span className="stat-change neutral">
-              Last active {formatTimeAgo(stats.lastActive)}
-            </span>
-          </div>
-        </div>
-
-        {/* Training Progress */}
-        <div className="stat-card accent">
-          <div className="stat-icon">🧠</div>
-          <div className="stat-content">
-            <h3>{stats.trainingProgress}%</h3>
-            <p>Training Complete</p>
-            <div className="progress-bar">
-              <div 
-                className="progress-fill"
-                style={{ width: `${stats.trainingProgress}%` }}
-              ></div>
+        {overviewCards.map((card) => (
+          <div key={card.label} className="stat-card">
+            <div className="stat-icon">{card.icon}</div>
+            <div>
+              <div className="stat-value">{card.value}</div>
+              <div className="stat-label">{card.label}</div>
+              <div className="stat-helper">{card.helper}</div>
             </div>
           </div>
-        </div>
-
-        {/* Response Accuracy */}
-        <div className="stat-card success">
-          <div className="stat-icon">🎯</div>
-          <div className="stat-content">
-            <h3>{stats.responseAccuracy}%</h3>
-            <p>Response Accuracy</p>
-            <span className="stat-change positive">
-              {stats.responseAccuracy > 80 ? 'Excellent!' : 'Good'}
-            </span>
-          </div>
-        </div>
+        ))}
       </div>
 
-      {/* Recent Activity Section */}
-      <div className="recent-activity">
-        <div className="section-header">
-          <h3>Recent Activity</h3>
-          <button className="view-all-btn">View All</button>
-        </div>
+      <div className="insights-grid">
+        {secondaryStats.map((item) => (
+          <div key={item.title} className="insight-card">
+            <h3>{item.title}</h3>
+            <p className="insight-value">{item.value}</p>
+            <p className="insight-description">{item.description}</p>
+          </div>
+        ))}
+      </div>
 
-        <div className="activity-list">
-          {recentActivity.length > 0 ? (
-            recentActivity.map((activity, index) => (
-              <div key={index} className="activity-item">
-                <div className="activity-icon">
-                  {activity.type === 'chat' && '💬'}
-                  {activity.type === 'training' && '🧠'}
-                  {activity.type === 'voice' && '🎤'}
-                  {activity.type === 'widget' && '🔧'}
-                </div>
+      <div className="activity-card">
+        <div className="activity-header">
+          <h3>Recent Activity</h3>
+          <span>{recentActivity.length > 0 ? `${recentActivity.length} latest entries` : 'No activity logged yet'}</span>
+        </div>
+        {recentActivity.length === 0 ? (
+          <div className="empty-state">
+            <span className="empty-icon">📭</span>
+            <p>No recent conversations recorded.</p>
+            <p className="empty-helper">Start a new session or add training content to see it here.</p>
+          </div>
+        ) : (
+          <div className="activity-list">
+            {recentActivity.map((entry) => (
+              <div key={entry.session_id || entry.created_at} className="activity-item">
                 <div className="activity-content">
-                  <p className="activity-text">{activity.description}</p>
-                  <span className="activity-time">
-                    {formatTimeAgo(new Date(activity.timestamp))}
+                  <p className="activity-summary">{entry.summary || 'Conversation summary not available.'}</p>
+                  <span className="activity-meta">
+                    Session {entry.session_id || '—'} · {formatRelativeTime(entry.created_at)}
                   </span>
                 </div>
+                <div className="activity-date">
+                  {entry.created_at ? new Date(entry.created_at).toLocaleString() : '—'}
+                </div>
               </div>
-            ))
-          ) : (
-            <div className="no-activity">
-              <p>No recent activity found.</p>
-              <p>Start chatting with your AI to see activity here!</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="quick-actions">
-        <h3>Quick Actions</h3>
-        <div className="actions-grid">
-          <button className="action-btn primary">
-            <span>🎤</span>
-            Start Voice Chat
-          </button>
-          <button className="action-btn secondary">
-            <span>🧠</span>
-            Continue Training
-          </button>
-          <button className="action-btn accent">
-            <span>🔧</span>
-            Generate Widget
-          </button>
-          <button className="action-btn neutral">
-            <span>📊</span>
-            View Analytics
-          </button>
-        </div>
-      </div>
-
-      {/* Tips Section */}
-      <div className="tips-section">
-        <h3>💡 Tips to Improve Your AI</h3>
-        <div className="tips-list">
-          {stats.trainingProgress < 50 && (
-            <div className="tip-item">
-              <p>Upload more training data to improve response quality</p>
-            </div>
-          )}
-          {stats.responseAccuracy < 80 && (
-            <div className="tip-item">
-              <p>Review and correct responses to boost accuracy</p>
-            </div>
-          )}
-          {stats.totalChats < 10 && (
-            <div className="tip-item">
-              <p>Have more conversations to help your AI learn your style</p>
-            </div>
-          )}
-          <div className="tip-item">
-            <p>Regular voice chats help improve natural conversation flow</p>
+            ))}
           </div>
-        </div>
+        )}
       </div>
+
+      <style jsx>{`
+        .dashboard-overview {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-6);
+        }
+
+        .overview-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: var(--space-6);
+        }
+
+        .overview-header h2 {
+          font-size: var(--text-3xl);
+          font-weight: var(--font-weight-bold);
+          color: var(--gray-900);
+          margin-bottom: var(--space-1);
+        }
+
+        .overview-header p {
+          color: var(--gray-600);
+          max-width: 640px;
+        }
+
+        .refresh-btn {
+          border: none;
+          background: var(--gray-200);
+          color: var(--gray-700);
+          padding: var(--space-2) var(--space-4);
+          border-radius: var(--radius-md);
+          cursor: pointer;
+          font-weight: var(--font-weight-medium);
+        }
+
+        .refresh-btn:hover {
+          background: var(--gray-300);
+        }
+
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: var(--space-4);
+        }
+
+        .stat-card {
+          display: flex;
+          align-items: center;
+          gap: var(--space-4);
+          padding: var(--space-5);
+          border-radius: var(--radius-xl);
+          border: 1px solid var(--gray-200);
+          background: var(--white);
+          box-shadow: var(--shadow-sm);
+        }
+
+        .stat-icon {
+          font-size: 2rem;
+        }
+
+        .stat-value {
+          font-size: var(--text-2xl);
+          font-weight: var(--font-weight-semibold);
+          color: var(--gray-900);
+        }
+
+        .stat-label {
+          color: var(--gray-600);
+          font-weight: var(--font-weight-medium);
+        }
+
+        .stat-helper {
+          color: var(--gray-500);
+          font-size: var(--text-sm);
+        }
+
+        .insights-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: var(--space-4);
+        }
+
+        .insight-card {
+          background: var(--gray-50);
+          border: 1px solid var(--gray-200);
+          border-radius: var(--radius-xl);
+          padding: var(--space-5);
+        }
+
+        .insight-card h3 {
+          font-size: var(--text-lg);
+          color: var(--gray-800);
+          margin-bottom: var(--space-2);
+        }
+
+        .insight-value {
+          font-size: var(--text-2xl);
+          font-weight: var(--font-weight-semibold);
+          color: var(--primary-600);
+        }
+
+        .insight-description {
+          color: var(--gray-600);
+          margin-top: var(--space-2);
+          line-height: 1.6;
+        }
+
+        .activity-card {
+          background: var(--white);
+          border: 1px solid var(--gray-200);
+          border-radius: var(--radius-xl);
+          padding: var(--space-5);
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-4);
+        }
+
+        .activity-header {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: var(--space-4);
+        }
+
+        .activity-header h3 {
+          font-size: var(--text-xl);
+          font-weight: var(--font-weight-semibold);
+        }
+
+        .activity-header span {
+          color: var(--gray-500);
+          font-size: var(--text-sm);
+        }
+
+        .activity-list {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-3);
+        }
+
+        .activity-item {
+          display: flex;
+          justify-content: space-between;
+          gap: var(--space-4);
+          padding: var(--space-4);
+          border-radius: var(--radius-lg);
+          border: 1px solid var(--gray-100);
+          background: var(--gray-50);
+        }
+
+        .activity-summary {
+          color: var(--gray-800);
+          font-weight: var(--font-weight-medium);
+        }
+
+        .activity-meta {
+          color: var(--gray-500);
+          font-size: var(--text-sm);
+        }
+
+        .activity-date {
+          color: var(--gray-500);
+          font-size: var(--text-sm);
+          min-width: 160px;
+          text-align: right;
+        }
+
+        .empty-state {
+          text-align: center;
+          padding: var(--space-10) var(--space-4);
+          color: var(--gray-600);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: var(--space-2);
+        }
+
+        .empty-icon {
+          font-size: 3rem;
+        }
+
+        .empty-helper {
+          color: var(--gray-500);
+          font-size: var(--text-sm);
+        }
+
+        @media (max-width: 768px) {
+          .overview-header {
+            flex-direction: column;
+          }
+
+          .activity-item {
+            flex-direction: column;
+          }
+
+          .activity-date {
+            text-align: left;
+          }
+        }
+      `}</style>
     </div>
   );
 };

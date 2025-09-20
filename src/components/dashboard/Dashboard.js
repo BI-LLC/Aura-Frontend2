@@ -2,6 +2,7 @@
 // =========================================================
 
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
 
@@ -9,6 +10,7 @@ import LoadingSpinner from '../common/LoadingSpinner';
 import DashboardOverview from './DashboardOverview';
 import TrainingDashboard from './TrainingDashboard';
 import WidgetGenerator from './WidgetGenerator';
+import SettingsTab from './SettingsTab';
 
 /**
  * Main Dashboard Component
@@ -17,7 +19,8 @@ import WidgetGenerator from './WidgetGenerator';
  * Each major feature now has its own dedicated file
  */
 const Dashboard = () => {
-  const { user, supabase } = useAuth();
+  const navigate = useNavigate();
+  const { user, supabase, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -28,6 +31,7 @@ const Dashboard = () => {
     totalDocuments: 0,
     totalQAPairs: 0,
     totalLogicNotes: 0,
+    uniqueTagCount: 0,
     recentActivity: []
   });
 
@@ -81,12 +85,21 @@ const Dashboard = () => {
   };
 
   const tabs = [
-    { id: 'overview', label: 'Overview', component: DashboardOverview },
-    { id: 'training', label: 'Training Content', component: TrainingDashboard },
-    { id: 'analytics', label: 'Analytics', component: AnalyticsTab },
-    { id: 'widget', label: 'Widget Code', component: WidgetGenerator },
-    { id: 'settings', label: 'Settings', component: SettingsTab }
+    { id: 'overview', label: 'Overview', icon: '📊', component: DashboardOverview },
+    { id: 'training', label: 'Training Content', icon: '🧠', component: TrainingDashboard },
+    { id: 'analytics', label: 'Analytics', icon: '📈', component: AnalyticsTab },
+    { id: 'widget', label: 'Widget Code', icon: '🧩', component: WidgetGenerator },
+    { id: 'settings', label: 'Settings', icon: '⚙️', component: SettingsTab }
   ];
+
+  const handleSignOut = async () => {
+    const result = await signOut();
+    if (result?.success) {
+      navigate('/login');
+    } else if (result?.error) {
+      console.error('Sign out failed:', result.error);
+    }
+  };
 
   const getCurrentTabComponent = () => {
     const currentTab = tabs.find(tab => tab.id === activeTab);
@@ -142,12 +155,17 @@ const Dashboard = () => {
         {/* Dashboard Header */}
         <div className="dashboard-header">
           <div className="header-content">
-            <h1 className="dashboard-title">
-              Welcome back, {user?.name?.split(' ')[0] || 'User'}!
-            </h1>
-            <p className="dashboard-subtitle">
-              Manage your AI assistant, review performance, and optimize your voice experience.
-            </p>
+            <div>
+              <h1 className="dashboard-title">
+                Welcome back, {user?.user_metadata?.full_name?.split(' ')[0] || user?.email || 'User'}!
+              </h1>
+              <p className="dashboard-subtitle">
+                Manage your AI assistant, review performance, and optimize your voice experience.
+              </p>
+            </div>
+            <button className="signout-btn" onClick={handleSignOut}>
+              Sign out
+            </button>
           </div>
         </div>
 
@@ -181,6 +199,14 @@ const Dashboard = () => {
 
         .dashboard-header {
           margin-bottom: var(--space-8);
+        }
+
+        .header-content {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: var(--space-4);
+          flex-wrap: wrap;
         }
 
         .dashboard-title {
@@ -225,6 +251,21 @@ const Dashboard = () => {
           position: relative;
           white-space: nowrap;
           min-width: fit-content;
+        }
+
+        .signout-btn {
+          align-self: flex-start;
+          border: 1px solid var(--gray-300);
+          background: var(--white);
+          color: var(--gray-700);
+          padding: var(--space-2) var(--space-4);
+          border-radius: var(--radius-md);
+          font-weight: var(--font-weight-medium);
+          cursor: pointer;
+        }
+
+        .signout-btn:hover {
+          background: var(--gray-100);
         }
 
         .tab-button:hover {
@@ -343,76 +384,6 @@ const AnalyticsTab = ({ dashboardData }) => (
       <div className="placeholder-card">
         <h3>Usage Analytics</h3>
         <p>Analyze usage trends, peak hours, and feature adoption.</p>
-      </div>
-    </div>
-    
-    <style jsx>{`
-      .placeholder-tab {
-        text-align: center;
-        padding: var(--space-8);
-      }
-
-      .placeholder-title {
-        font-size: var(--text-3xl);
-        font-weight: var(--font-weight-bold);
-        color: var(--gray-900);
-        margin-bottom: var(--space-2);
-      }
-
-      .placeholder-description {
-        font-size: var(--text-lg);
-        color: var(--gray-600);
-        margin-bottom: var(--space-8);
-      }
-
-      .placeholder-content {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: var(--space-6);
-        margin-top: var(--space-8);
-      }
-
-      .placeholder-card {
-        background: var(--gray-50);
-        border: 1px solid var(--gray-200);
-        border-radius: var(--radius-xl);
-        padding: var(--space-6);
-        text-align: left;
-      }
-
-      .placeholder-card h3 {
-        font-size: var(--text-xl);
-        font-weight: var(--font-weight-semibold);
-        color: var(--gray-900);
-        margin-bottom: var(--space-2);
-      }
-
-      .placeholder-card p {
-        color: var(--gray-600);
-        line-height: 1.6;
-      }
-    `}</style>
-  </div>
-);
-
-const SettingsTab = ({ user, supabase }) => (
-  <div className="placeholder-tab">
-    <h2 className="placeholder-title">AI Settings</h2>
-    <p className="placeholder-description">
-      Customize your AI's personality, voice, and behavior preferences.
-    </p>
-    <div className="placeholder-content">
-      <div className="placeholder-card">
-        <h3>Personality Settings</h3>
-        <p>Adjust your AI's tone, formality level, and conversation style.</p>
-      </div>
-      <div className="placeholder-card">
-        <h3>Voice Configuration</h3>
-        <p>Select voice models, speed, and speech synthesis preferences.</p>
-      </div>
-      <div className="placeholder-card">
-        <h3>Response Behavior</h3>
-        <p>Configure response length, creativity, and knowledge boundaries.</p>
       </div>
     </div>
     
