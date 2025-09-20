@@ -27,7 +27,6 @@ const Homepage = () => {
         <div className="container">
           <div className={`hero-content ${isVisible ? 'animate-in' : ''}`}>
             <div className="hero-badge">
-              <span className="badge-icon">🚀</span>
               <span className="badge-text">Next-Generation Voice AI</span>
             </div>
             
@@ -55,10 +54,10 @@ const Homepage = () => {
               ) : (
                 <>
                   <Link to="/register" className="btn btn-primary btn-lg">
-                    🎤 Start Building
+                    Start Building
                   </Link>
                   <Link to="/explore" className="btn btn-secondary btn-lg">
-                    👁️ See Demo
+                    See Demo
                   </Link>
                 </>
               )}
@@ -360,10 +359,6 @@ const Homepage = () => {
           font-weight: var(--font-weight-medium);
           margin-bottom: var(--space-6);
           border: 1px solid var(--primary-200);
-        }
-
-        .badge-icon {
-          font-size: var(--text-base);
         }
 
         .hero-title {

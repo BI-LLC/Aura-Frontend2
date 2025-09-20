@@ -228,7 +228,7 @@ const Register = () => {
       <div className="register-page">
         <div className="success-container">
           <div className="success-card">
-            <div className="success-icon">✅</div>
+            <div className="success-icon" aria-hidden="true">Success</div>
             <h1 className="success-title">Registration Successful!</h1>
             <p className="success-message">
               Welcome to Aura! We've sent a confirmation email to <strong>{formData.email}</strong>. 
@@ -252,7 +252,6 @@ const Register = () => {
           {/* Header */}
           <div className="register-header">
             <Link to="/" className="logo-link">
-              <span className="logo-icon">🎤</span>
               <span className="logo-text">Aura</span>
             </Link>
             <h1 className="register-title">Create your account</h1>
@@ -544,7 +543,7 @@ const Register = () => {
         {/* Side Content */}
         <div className="register-side">
           <div className="side-content">
-            <div className="side-icon">🚀</div>
+            <div className="side-icon" aria-hidden="true">Insight</div>
             <h3 className="side-title">Build the future of voice AI</h3>
             <p className="side-description">
               Create intelligent voice assistants that understand your business, 
@@ -566,24 +565,24 @@ const Register = () => {
               </div>
             </div>
 
-            <div className="side-features">
-              <div className="side-feature">
-                <span className="feature-check">✅</span>
-                <span>Enterprise-grade security</span>
+              <div className="side-features">
+                <div className="side-feature">
+                  <span className="feature-check" aria-hidden="true">•</span>
+                  <span>Enterprise-grade security</span>
+                </div>
+                <div className="side-feature">
+                  <span className="feature-check" aria-hidden="true">•</span>
+                  <span>Custom personality training</span>
+                </div>
+                <div className="side-feature">
+                  <span className="feature-check" aria-hidden="true">•</span>
+                  <span>Real-time analytics</span>
+                </div>
+                <div className="side-feature">
+                  <span className="feature-check" aria-hidden="true">•</span>
+                  <span>Easy integration</span>
+                </div>
               </div>
-              <div className="side-feature">
-                <span className="feature-check">✅</span>
-                <span>Custom personality training</span>
-              </div>
-              <div className="side-feature">
-                <span className="feature-check">✅</span>
-                <span>Real-time analytics</span>
-              </div>
-              <div className="side-feature">
-                <span className="feature-check">✅</span>
-                <span>Easy integration</span>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -625,17 +624,13 @@ const Register = () => {
           margin-bottom: var(--space-6);
         }
 
-        .logo-link {
-          display: inline-flex;
-          align-items: center;
-          gap: var(--space-2);
-          text-decoration: none;
-          margin-bottom: var(--space-4);
-        }
-
-        .logo-icon {
-          font-size: var(--text-3xl);
-        }
+          .logo-link {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-2);
+            text-decoration: none;
+            margin-bottom: var(--space-4);
+          }
 
         .logo-text {
           font-size: var(--text-2xl);

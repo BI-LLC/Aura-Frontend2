@@ -159,7 +159,6 @@ const Login = () => {
           {/* Header */}
           <div className="login-header">
             <Link to="/" className="logo-link">
-              <span className="logo-icon">🎤</span>
               <span className="logo-text">Aura</span>
             </Link>
             <h1 className="login-title">Welcome back</h1>
@@ -304,7 +303,7 @@ const Login = () => {
                 onClick={handleDemoLogin}
                 className="btn btn-secondary btn-sm w-full mt-3"
               >
-                🧪 Demo Login
+                Demo Login
               </button>
             )}
           </form>
@@ -323,7 +322,7 @@ const Login = () => {
         {/* Side Content (optional) */}
         <div className="login-side">
           <div className="side-content">
-            <div className="side-icon">🚀</div>
+            <div className="side-icon" aria-hidden="true">Insight</div>
             <h3 className="side-title">Join thousands of professionals</h3>
             <p className="side-description">
               Create intelligent voice AI assistants that understand your business 
@@ -332,17 +331,17 @@ const Login = () => {
             
             <div className="side-features">
               <div className="side-feature">
-                <span className="feature-check">✅</span>
+                <span className="feature-check" aria-hidden="true">•</span>
                 <span>Enterprise-grade security</span>
               </div>
-              <div className="side-feature">
-                <span className="feature-check">✅</span>
-                <span>Sub-2-second response times</span>
-              </div>
-              <div className="side-feature">
-                <span className="feature-check">✅</span>
-                <span>Custom personality training</span>
-              </div>
+                <div className="side-feature">
+                  <span className="feature-check" aria-hidden="true">•</span>
+                  <span>Sub-2-second response times</span>
+                </div>
+                <div className="side-feature">
+                  <span className="feature-check" aria-hidden="true">•</span>
+                  <span>Custom personality training</span>
+                </div>
             </div>
           </div>
         </div>
@@ -389,10 +388,6 @@ const Login = () => {
           gap: var(--space-2);
           text-decoration: none;
           margin-bottom: var(--space-6);
-        }
-
-        .logo-icon {
-          font-size: var(--text-3xl);
         }
 
         .logo-text {

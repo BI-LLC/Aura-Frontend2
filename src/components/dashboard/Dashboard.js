@@ -85,11 +85,11 @@ const Dashboard = () => {
   };
 
   const tabs = [
-    { id: 'overview', label: 'Overview', icon: '📊', component: DashboardOverview },
-    { id: 'training', label: 'Training Content', icon: '🧠', component: TrainingDashboard },
-    { id: 'analytics', label: 'Analytics', icon: '📈', component: AnalyticsTab },
-    { id: 'widget', label: 'Widget Code', icon: '🧩', component: WidgetGenerator },
-    { id: 'settings', label: 'Settings', icon: '⚙️', component: SettingsTab }
+    { id: 'overview', label: 'Overview', component: DashboardOverview },
+    { id: 'training', label: 'Training Content', component: TrainingDashboard },
+    { id: 'analytics', label: 'Analytics', component: AnalyticsTab },
+    { id: 'widget', label: 'Widget Code', component: WidgetGenerator },
+    { id: 'settings', label: 'Settings', component: SettingsTab }
   ];
 
   const handleSignOut = async () => {
@@ -177,7 +177,6 @@ const Dashboard = () => {
               onClick={() => setActiveTab(tab.id)}
               className={`tab-button ${activeTab === tab.id ? 'active' : ''}`}
             >
-              <span className="tab-icon">{tab.icon}</span>
               <span className="tab-label">{tab.label}</span>
             </button>
           ))}
@@ -277,10 +276,6 @@ const Dashboard = () => {
           color: var(--primary-600);
           background: var(--white);
           border-bottom: 2px solid var(--primary-600);
-        }
-
-        .tab-icon {
-          font-size: var(--text-lg);
         }
 
         .tab-content {

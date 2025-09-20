@@ -419,13 +419,13 @@ const VoiceChat = () => {
               className={`btn btn-primary btn-lg voice-btn ${isRecording ? 'recording' : ''}`}
             >
               {isRecording ? (
-                <>🎙️ Recording...</>
+                <>Recording...</>
               ) : (
-                <>📞 Call</>
+                <>Start Call</>
               )}
             </button>
             <button className="btn btn-secondary btn-lg">
-              💬 Chat
+              Open Chat
             </button>
           </div>
         </div>
@@ -442,7 +442,7 @@ const VoiceChat = () => {
                   onClick={() => handleQuestionClick(question)}
                   className="question-card"
                 >
-                  <span className="question-icon">💡</span>
+                  <span className="question-icon" aria-hidden="true">Q</span>
                   <span className="question-text">{question}</span>
                 </button>
               ))}

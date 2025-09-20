@@ -51,7 +51,7 @@ const ActionTypes = {
 // Auth reducer
 function authReducer(state, action) {
   if (isDebugMode) {
-    console.log('🔐 Auth Action:', action.type, action.payload);
+    console.log('Auth Action:', action.type, action.payload);
   }
 
   switch (action.type) {
@@ -172,7 +172,7 @@ export const AuthProvider = ({ children }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (isDebugMode) {
-          console.log('🔐 Supabase auth event:', event, session);
+          console.log('Supabase auth event:', event, session);
         }
 
         if (session?.user) {
@@ -240,27 +240,26 @@ export const AuthProvider = ({ children }) => {
       if (error) throw error;
 
       if (isDebugMode) {
-        console.log('✅ Sign up successful:', data);
+        console.log('Sign up successful:', data);
       }
 
-      return { 
-        success: true, 
+      return {
+        success: true,
         user: data.user,
-        message: data.user?.email_confirmed_at 
+        message: data.user?.email_confirmed_at
           ? 'Account created successfully!'
           : 'Please check your email to confirm your account.'
       };
-
     } catch (error) {
       const errorMessage = error.message || 'Sign up failed. Please try again.';
-      
+
       dispatch({
         type: ActionTypes.SET_ERROR,
         payload: errorMessage
       });
 
       if (isDebugMode) {
-        console.error('❌ Sign up failed:', error);
+        console.error('Sign up failed:', error);
       }
 
       return { success: false, error: errorMessage };
@@ -280,21 +279,20 @@ export const AuthProvider = ({ children }) => {
       if (error) throw error;
 
       if (isDebugMode) {
-        console.log('✅ Sign in successful:', data.user);
+        console.log('Sign in successful:', data.user);
       }
 
       return { success: true, user: data.user };
-
     } catch (error) {
       const errorMessage = error.message || 'Sign in failed. Please try again.';
-      
+
       dispatch({
         type: ActionTypes.SET_ERROR,
         payload: errorMessage
       });
 
       if (isDebugMode) {
-        console.error('❌ Sign in failed:', error);
+        console.error('Sign in failed:', error);
       }
 
       return { success: false, error: errorMessage };
@@ -316,14 +314,13 @@ export const AuthProvider = ({ children }) => {
       if (error) throw error;
 
       if (isDebugMode) {
-        console.log('✅ Google sign in initiated');
+        console.log('Google sign in initiated');
       }
 
       return { success: true };
-
     } catch (error) {
       const errorMessage = error.message || 'Google sign in failed. Please try again.';
-      
+
       dispatch({
         type: ActionTypes.SET_ERROR,
         payload: errorMessage
@@ -337,17 +334,16 @@ export const AuthProvider = ({ children }) => {
   const signOut = async () => {
     try {
       const { error } = await supabase.auth.signOut();
-      
+
       if (error) {
         console.error('Sign out error:', error);
       }
 
       if (isDebugMode) {
-        console.log('✅ Sign out successful');
+        console.log('Sign out successful');
       }
 
       return { success: true };
-
     } catch (error) {
       console.error('Sign out failed:', error);
       return { success: false, error: error.message };
