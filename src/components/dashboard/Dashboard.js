@@ -1,7 +1,7 @@
 // Aura Voice AI - Main Dashboard Component (Refactored)
 // =========================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -81,9 +81,9 @@ const Dashboard = () => {
   };
 
   // Update dashboard data from child components
-  const updateDashboardData = (updates) => {
+  const updateDashboardData = useCallback((updates) => {
     setDashboardData(prev => ({ ...prev, ...updates }));
-  };
+  }, []);
 
   const tabs = [
     { id: 'overview', label: 'Overview', component: DashboardOverview },

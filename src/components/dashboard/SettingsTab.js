@@ -81,7 +81,12 @@ const SettingsTab = ({ user, supabase }) => {
             fullName: tenantResult.data.name || prev.fullName,
             email: tenantResult.data.email || prev.email,
             bio: personaSettings.bio || prev.bio,
-            username: personaSettings.username || prev.username
+            username: personaSettings.username || prev.username,
+            avatarUrl:
+              personaSettings.avatar_url ||
+              personaSettings.avatarUrl ||
+              personaSettings.profile_picture ||
+              prev.avatarUrl
           }));
         } else {
           setTenantUser(null);
@@ -143,7 +148,8 @@ const SettingsTab = ({ user, supabase }) => {
         const updatedPersonaSettings = {
           ...(tenantUser.persona_settings || {}),
           bio: profile.bio,
-          username: profile.username
+          username: profile.username,
+          avatar_url: profile.avatarUrl
         };
 
         const { data: tenantData, error: tenantError } = await supabase
@@ -211,7 +217,35 @@ const SettingsTab = ({ user, supabase }) => {
 
       if (updateError) throw updateError;
 
-      setProfile((prev) => ({ ...prev, avatarUrl: newAvatar }));
+      setProfile(prev => ({ ...prev, avatarUrl: newAvatar }));
+
+      if (tenantUser?.tenant_id) {
+        const updatedPersonaSettings = {
+          ...(tenantUser.persona_settings || {}),
+          avatar_url: newAvatar
+        };
+
+        const { error: tenantUpdateError } = await supabase
+          .from('tenant_users')
+          .upsert({
+            user_id: user.id,
+            tenant_id: tenantUser.tenant_id,
+            email: tenantUser.email || profile.email,
+            name: tenantUser.name || profile.fullName,
+            persona_settings: updatedPersonaSettings
+          }, { onConflict: 'user_id' });
+
+        if (tenantUpdateError) throw tenantUpdateError;
+
+        setTenantUser(prev => ({
+          ...(prev || {}),
+          tenant_id: tenantUser.tenant_id,
+          email: tenantUser.email || profile.email,
+          name: tenantUser.name || profile.fullName,
+          persona_settings: updatedPersonaSettings
+        }));
+      }
+
       showAlert('Profile photo updated.', 'success');
     } catch (error) {
       showAlert(error.message || 'Unable to upload profile photo.', 'error');

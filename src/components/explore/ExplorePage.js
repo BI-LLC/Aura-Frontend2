@@ -1,7 +1,7 @@
 // Aura Voice AI - Explore Page Component
 // ====================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -42,19 +42,14 @@ const ExplorePage = () => {
     { id: 'name', label: 'Name A-Z' }
   ];
 
-  // Fetch chatbots on component mount
-  useEffect(() => {
-    fetchChatbots();
-  }, []);
-
-  // Fetch real chatbots from Supabase
-  const fetchChatbots = async () => {
+  const fetchChatbots = useCallback(async () => {
     try {
       setLoading(true);
-      
-      // ✅ FIXED: Use supabase from top-level destructuring, no useAuth() call here
+
       if (!supabase) {
-        throw new Error('Supabase client not available');
+        setChatbots([]);
+        setLoading(false);
+        return;
       }
 
       // Query tenant_users with their personas and preferences
@@ -67,6 +62,7 @@ const ExplorePage = () => {
           role,
           created_at,
           tenant_id,
+          persona_settings,
           user_preferences (
             communication_style,
             response_pace,
@@ -106,8 +102,9 @@ const ExplorePage = () => {
         const totalChats = userStats.length;
         const persona = user.user_personas;
         const preferences = user.user_preferences;
+        const personaSettings = user.persona_settings || {};
 
-        const displayName = user.name?.trim() || user.email?.split('@')[0] || 'Aura Assistant';
+        const displayName = personaSettings.display_name?.trim() || user.name?.trim() || user.email?.split('@')[0] || 'Aura Assistant';
 
         // Generate slug from display name
         const slug = displayName.toLowerCase()
@@ -123,28 +120,43 @@ const ExplorePage = () => {
           .toUpperCase()
           .substring(0, 2) || 'AA';
 
+        const avatarUrl =
+          personaSettings.avatar_url ||
+          personaSettings.avatarUrl ||
+          personaSettings.profile_picture ||
+          personaSettings.photo_url ||
+          null;
+
         // Determine category based on expertise areas
         let category = 'business'; // default
         const expertiseAreas = Array.isArray(preferences?.expertise_areas)
-          ? preferences.expertise_areas
+          ? [...preferences.expertise_areas]
           : [];
-        if (expertiseAreas.includes('healthcare') || expertiseAreas.includes('medical')) {
+        const personaTags = Array.isArray(personaSettings.tags)
+          ? personaSettings.tags.filter(Boolean)
+          : [];
+        const expertisePool = [...expertiseAreas, ...personaTags];
+
+        if (expertisePool.includes('healthcare') || expertisePool.includes('medical')) {
           category = 'healthcare';
-        } else if (expertiseAreas.includes('technology') || expertiseAreas.includes('tech')) {
+        } else if (expertisePool.includes('technology') || expertisePool.includes('tech')) {
           category = 'tech';
-        } else if (expertiseAreas.includes('education') || expertiseAreas.includes('teaching')) {
+        } else if (expertisePool.includes('education') || expertisePool.includes('teaching')) {
           category = 'education';
-        } else if (expertiseAreas.includes('support') || expertiseAreas.includes('customer-service')) {
+        } else if (expertisePool.includes('support') || expertisePool.includes('customer-service')) {
           category = 'customer-service';
         }
 
         // Generate description from persona and preferences
-        let description = `Professional AI assistant`;
-        if (preferences?.communication_style) {
-          description += ` with ${preferences.communication_style} communication style`;
-        }
-        if (expertiseAreas.length > 0) {
-          description += `. Specializing in ${expertiseAreas.slice(0, 3).join(', ')}.`;
+        let description = personaSettings.bio?.trim() || '';
+        if (!description) {
+          description = 'Professional AI assistant';
+          if (preferences?.communication_style) {
+            description += ` with ${preferences.communication_style} communication style`;
+          }
+          if (expertisePool.length > 0) {
+            description += `. Specializing in ${expertisePool.slice(0, 3).join(', ')}.`;
+          }
         }
 
         // Calculate mock rating based on confidence and sessions
@@ -164,10 +176,12 @@ const ExplorePage = () => {
           title: `${displayName.split(' ')[0]}'s AI Assistant`,
           category: category,
           description: description,
+          bio: personaSettings.bio || '',
           avatar: avatar,
+          avatarUrl,
           rating: parseFloat(rating.toFixed(1)),
           totalChats: totalChats,
-          tags: expertiseAreas.slice(0, 3).map(tag =>
+          tags: expertisePool.slice(0, 3).map(tag =>
             tag.charAt(0).toUpperCase() + tag.slice(1)
           ),
           isVerified: user.role === 'owner' || totalChats > 50,
@@ -194,10 +208,14 @@ const ExplorePage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [supabase]);
+
+  useEffect(() => {
+    fetchChatbots();
+  }, [fetchChatbots]);
 
   // Filter and sort chatbots
-  const filteredAndSortedChatbots = React.useMemo(() => {
+  const filteredAndSortedChatbots = useMemo(() => {
     let filtered = [...chatbots];
 
     // Apply search filter
@@ -592,7 +610,11 @@ const ChatbotCard = ({ chatbot }) => {
       <div className="card-header">
         <div className="avatar-section">
           <div className="chatbot-avatar">
-            {chatbot.avatar}
+            {chatbot.avatarUrl ? (
+              <img src={chatbot.avatarUrl} alt={`${chatbot.name} avatar`} />
+            ) : (
+              <span>{chatbot.avatar}</span>
+            )}
           </div>
           <div className="verification-badge">
             {chatbot.isVerified && (
@@ -685,6 +707,21 @@ const ChatbotCard = ({ chatbot }) => {
           color: var(--white);
           font-size: var(--text-xl);
           font-weight: var(--font-weight-semibold);
+        }
+
+        .chatbot-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          border-radius: 50%;
+        }
+
+        .chatbot-avatar span {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          height: 100%;
         }
 
         .verification-badge {

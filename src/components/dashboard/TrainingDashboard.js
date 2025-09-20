@@ -75,10 +75,13 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
 
   const fetchAllData = useCallback(
     async (withLoader = false) => {
-      if (!supabase) return;
-
       if (withLoader) {
         setLoading(true);
+      }
+
+      if (!supabase) {
+        setLoading(false);
+        return;
       }
 
       try {
@@ -97,8 +100,10 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
             .eq('uploaded_by', userId)
             .order('created_at', { ascending: false });
 
-          if (materialsResult.error) {
-            console.warn('Falling back to all reference materials:', materialsResult.error?.message || materialsResult.error);
+          if (materialsResult.error || (materialsResult.data ?? []).length === 0) {
+            if (materialsResult.error) {
+              console.warn('Falling back to all reference materials:', materialsResult.error?.message || materialsResult.error);
+            }
             materialsResult = await supabase
               .from('reference_materials')
               .select('*')
@@ -111,8 +116,10 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
             .eq('created_by', userId)
             .order('created_at', { ascending: false });
 
-          if (notesResult.error) {
-            console.warn('Falling back to all logic notes:', notesResult.error?.message || notesResult.error);
+          if (notesResult.error || (notesResult.data ?? []).length === 0) {
+            if (notesResult.error) {
+              console.warn('Falling back to all logic notes:', notesResult.error?.message || notesResult.error);
+            }
             notesResult = await supabase
               .from('logic_notes')
               .select('*')
@@ -170,9 +177,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         console.error('Failed to load training data:', error);
         showAlert('Failed to load training data from Supabase.', 'error');
       } finally {
-        if (withLoader) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     },
     [supabase, updateDashboardData, showAlert, userId]
@@ -618,7 +623,6 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         </div>
       ) : trainingData.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon" aria-hidden="true">Q&amp;A</div>
           <h4>No Q&amp;A pairs yet</h4>
           <p>Click "Add Q&amp;A Pair" to create your first prompt-response pair.</p>
         </div>
@@ -689,7 +693,6 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         </div>
       ) : referenceMaterials.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon" aria-hidden="true">Docs</div>
           <h4>No reference materials yet</h4>
           <p>Upload documents to build Aura's knowledge base.</p>
         </div>
@@ -747,7 +750,6 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         </div>
       ) : logicNotes.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon" aria-hidden="true">Logic</div>
           <h4>No logic notes yet</h4>
           <p>Define guidance and behavioral rules for Aura.</p>
         </div>
@@ -816,12 +818,9 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       <div className="summary-grid">
         {summaryCards.map(card => (
           <div key={card.label} className="summary-card">
-            <div className="summary-icon" aria-hidden="true">{card.label.charAt(0)}</div>
-            <div>
-              <div className="summary-value">{card.value}</div>
-              <div className="summary-label">{card.label}</div>
-              <div className="summary-helper">{card.helper}</div>
-            </div>
+            <div className="summary-value">{card.value}</div>
+            <div className="summary-label">{card.label}</div>
+            <div className="summary-helper">{card.helper}</div>
           </div>
         ))}
       </div>
@@ -1051,17 +1050,14 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
 
         .summary-card {
           display: flex;
-          align-items: center;
-          gap: var(--space-3);
+          flex-direction: column;
+          align-items: flex-start;
+          gap: var(--space-1);
           padding: var(--space-4);
           border-radius: var(--radius-xl);
           border: 1px solid var(--gray-200);
           background: var(--white);
           box-shadow: var(--shadow-xs);
-        }
-
-        .summary-icon {
-          font-size: 1.75rem;
         }
 
         .summary-value {
@@ -1311,11 +1307,6 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
           flex-direction: column;
           align-items: center;
           gap: var(--space-2);
-        }
-
-        .empty-icon {
-          font-size: 3rem;
-          margin-bottom: var(--space-2);
         }
 
         .panel-loading {
