@@ -915,6 +915,24 @@ const VoiceChat = () => {
           font-size: var(--text-4xl);
           font-weight: var(--font-weight-bold);
           box-shadow: var(--shadow-lg);
+          overflow: hidden;
+          position: relative;
+        }
+
+        .avatar-circle::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          border-radius: 50%;
+          box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.35);
+          pointer-events: none;
+        }
+
+        .avatar-circle img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
         }
 
         .verification-badge {
