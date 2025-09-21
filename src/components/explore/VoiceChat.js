@@ -1,7 +1,7 @@
 // Aura Voice AI - Individual Profile & Voice Chat Component
 // =========================================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -19,7 +19,7 @@ const PROFILE_BUCKET = process.env.REACT_APP_SUPABASE_AVATAR_BUCKET || 'avatars'
 const VoiceChat = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { supabase } = useAuth();
+  const { supabase, isAuthenticated } = useAuth();
 
   // State management
   const [profile, setProfile] = useState(null);
@@ -30,6 +30,36 @@ const VoiceChat = () => {
   const [messages, setMessages] = useState([]);
   const [questionInput, setQuestionInput] = useState('');
   const [avatarError, setAvatarError] = useState(false);
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  const [callStatus, setCallStatus] = useState('idle');
+  const [isMuted, setIsMuted] = useState(false);
+  const callTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      setShowLoginPrompt(false);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    return () => {
+      if (callTimerRef.current) {
+        clearTimeout(callTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isRecording) {
+      setCallStatus('idle');
+      setIsMuted(false);
+
+      if (callTimerRef.current) {
+        clearTimeout(callTimerRef.current);
+        callTimerRef.current = null;
+      }
+    }
+  }, [isRecording]);
 
   const getPublicAvatarUrl = useCallback((path) => {
     if (!path || !supabase) {
@@ -71,7 +101,7 @@ const VoiceChat = () => {
       if (slugCandidates.length > 0) {
         const { data: profileMatches, error: profileError } = await supabase
           .from('profiles')
-          .select('id, username, email, full_name, bio, title, avatar_url, avatar_path, created_at')
+          .select('id, username, email, full_name, bio, title, avatar_path, created_at')
           .in('username', slugCandidates)
           .limit(1);
 
@@ -140,7 +170,7 @@ const VoiceChat = () => {
           if (candidateIds.length > 0) {
             const { data: candidateProfiles, error: candidateProfileError } = await supabase
               .from('profiles')
-              .select('id, username, email, full_name, bio, title, avatar_url, avatar_path, created_at')
+              .select('id, username, email, full_name, bio, title, avatar_path, created_at')
               .in('id', candidateIds);
 
             if (candidateProfileError) {
@@ -490,14 +520,33 @@ const VoiceChat = () => {
 
   // Handle voice recording
   const handleVoiceRecord = () => {
+    if (!isAuthenticated) {
+      setShowLoginPrompt(true);
+      return;
+    }
+
+    setShowLoginPrompt(false);
+
+    if (callTimerRef.current) {
+      clearTimeout(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+
     if (isRecording) {
       setIsRecording(false);
-      // Here you would stop recording and send to your voice processing API
+      setCallStatus('idle');
+      setIsMuted(false);
       console.log('Stopping voice recording...');
     } else {
       setIsRecording(true);
-      // Here you would start voice recording
+      setCallStatus('connecting');
+      setIsMuted(false);
       console.log('Starting voice recording...');
+
+      callTimerRef.current = setTimeout(() => {
+        setCallStatus('in-call');
+        callTimerRef.current = null;
+      }, 600);
     }
   };
 
@@ -610,12 +659,12 @@ const VoiceChat = () => {
 
           {/* Action Buttons */}
           <div className="profile-actions">
-            <button 
+            <button
               onClick={handleVoiceRecord}
               className={`btn btn-primary btn-lg voice-btn ${isRecording ? 'recording' : ''}`}
             >
               {isRecording ? (
-                <>Recording...</>
+                <>End Call</>
               ) : (
                 <>Start Call</>
               )}
@@ -624,6 +673,53 @@ const VoiceChat = () => {
               Open Chat
             </button>
           </div>
+
+          {showLoginPrompt && (
+            <div className="call-login-prompt" role="alert">
+              <p>
+                Please sign in to start a voice call with {profile.name.split(' ')[0]}.
+              </p>
+              <div className="call-login-actions">
+                <Link to="/login" className="btn btn-primary btn-sm">Sign In</Link>
+                <Link to="/register" className="btn btn-secondary btn-sm">Create Account</Link>
+              </div>
+            </div>
+          )}
+
+          {isRecording && (
+            <div className="call-interface" role="status" aria-live="polite">
+              <div className="call-status">
+                <span className={`call-status-indicator ${callStatus}`} aria-hidden="true" />
+                <div>
+                  <p className="call-status-title">
+                    {callStatus === 'connecting' ? 'Connecting call...' : 'Call in progress'}
+                  </p>
+                  <p className="call-status-description">
+                    {callStatus === 'connecting'
+                      ? `Setting up a secure connection with ${profile.name}.`
+                      : `You are connected with ${profile.name}.`}
+                  </p>
+                </div>
+              </div>
+              <div className="call-controls">
+                <button
+                  type="button"
+                  className={`mute-btn ${isMuted ? 'active' : ''}`}
+                  onClick={() => setIsMuted((prev) => !prev)}
+                  aria-pressed={isMuted}
+                >
+                  {isMuted ? 'Unmute' : 'Mute'}
+                </button>
+                <button
+                  type="button"
+                  className="end-call-btn"
+                  onClick={handleVoiceRecord}
+                >
+                  End Call
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Main Content */}
@@ -885,6 +981,120 @@ const VoiceChat = () => {
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.8; }
+        }
+
+        .call-login-prompt {
+          margin-top: var(--space-4);
+          padding: var(--space-4);
+          border-radius: var(--radius-lg);
+          background: var(--error-100);
+          border: 1px solid rgba(239, 68, 68, 0.25);
+          color: var(--gray-700);
+        }
+
+        .call-login-prompt p {
+          margin-bottom: var(--space-3);
+          font-size: var(--text-sm);
+        }
+
+        .call-login-actions {
+          display: flex;
+          gap: var(--space-3);
+        }
+
+        .call-interface {
+          margin-top: var(--space-4);
+          padding: var(--space-4);
+          border-radius: var(--radius-xl);
+          background: var(--white);
+          border: 1px solid var(--gray-200);
+          box-shadow: var(--shadow-sm);
+        }
+
+        .call-status {
+          display: flex;
+          align-items: center;
+          gap: var(--space-4);
+        }
+
+        .call-status-title {
+          font-size: var(--text-lg);
+          font-weight: var(--font-weight-semibold);
+          color: var(--gray-900);
+          margin-bottom: var(--space-1);
+        }
+
+        .call-status-description {
+          font-size: var(--text-sm);
+          color: var(--gray-600);
+        }
+
+        .call-status-indicator {
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: var(--warning-500);
+          box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.15);
+          animation: call-pulse 1.5s infinite ease-in-out;
+        }
+
+        .call-status-indicator.in-call {
+          background: var(--success-500);
+          box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.2);
+        }
+
+        .call-status-indicator.idle {
+          background: var(--gray-400);
+          box-shadow: none;
+          animation: none;
+        }
+
+        @keyframes call-pulse {
+          0%, 100% { opacity: 0.8; }
+          50% { opacity: 1; }
+        }
+
+        .call-controls {
+          margin-top: var(--space-4);
+          display: flex;
+          gap: var(--space-3);
+        }
+
+        .mute-btn,
+        .end-call-btn {
+          flex: 1;
+          padding: var(--space-3) var(--space-4);
+          border-radius: var(--radius-lg);
+          border: none;
+          font-size: var(--text-base);
+          font-weight: var(--font-weight-medium);
+          cursor: pointer;
+          transition: all var(--transition-fast);
+        }
+
+        .mute-btn {
+          background: var(--gray-100);
+          color: var(--gray-700);
+        }
+
+        .mute-btn:hover {
+          background: var(--gray-200);
+        }
+
+        .mute-btn.active {
+          background: var(--gray-300);
+          color: var(--gray-900);
+        }
+
+        .end-call-btn {
+          background: var(--error-500);
+          color: var(--white);
+          box-shadow: var(--shadow-sm);
+        }
+
+        .end-call-btn:hover {
+          background: #dc2626;
+          box-shadow: var(--shadow-md);
         }
 
         /* Main Content */

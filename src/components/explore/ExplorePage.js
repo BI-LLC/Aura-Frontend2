@@ -63,7 +63,7 @@ const ExplorePage = () => {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, full_name, username, email, bio, title, avatar_url, avatar_path, created_at')
+        .select('id, full_name, username, email, bio, title, avatar_path, created_at')
         .order('created_at', { ascending: false })
         .limit(100);
 
@@ -184,7 +184,7 @@ const ExplorePage = () => {
             .in('user_id', userIds),
           supabase
             .from('profiles')
-            .select('id, username, full_name, email, bio, title, avatar_url, avatar_path, created_at')
+            .select('id, username, full_name, email, bio, title, avatar_path, created_at')
             .in('id', userIds)
         ]);
 
