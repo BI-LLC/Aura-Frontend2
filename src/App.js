@@ -12,6 +12,7 @@ import './styles/globals.css';
 const Homepage = lazy(() => import('./components/home/Homepage'));
 const ExplorePage = lazy(() => import('./components/explore/ExplorePage'));
 const VoiceChat = lazy(() => import('./components/explore/VoiceChat'));
+const VoiceCallSession = lazy(() => import('./components/explore/VoiceCallSession'));
 const Login = lazy(() => import('./components/auth/Login'));
 const Register = lazy(() => import('./components/auth/Register'));
 const Dashboard = lazy(() => import('./components/dashboard/Dashboard'));
@@ -142,9 +143,14 @@ function App() {
                   element={<ExplorePage />} 
                 />
                 
-                <Route 
-                  path="/chat/:slug" 
-                  element={<VoiceChat />} 
+                <Route
+                  path="/chat/:slug"
+                  element={<VoiceChat />}
+                />
+
+                <Route
+                  path="/chat/:slug/call"
+                  element={<VoiceCallSession />}
                 />
 
                 {/* Authentication Routes */}
