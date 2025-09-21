@@ -1,19 +1,50 @@
 // UserCard.js - User Profile Card Component
 // Displays user information and AI personality in the explore section
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { copyTextToClipboard } from '../../utils/clipboard';
+
+const looksLikeEmail = (value) => /@/.test((value || '').toString());
+const sanitizeName = (value) => {
+  if (!value) {
+    return '';
+  }
+  const trimmed = value.toString().trim();
+  if (!trimmed || looksLikeEmail(trimmed)) {
+    return '';
+  }
+  return trimmed;
+};
+const sanitizeUsername = (value) => {
+  if (!value) {
+    return '';
+  }
+  return value.toString().trim().replace(/^@+/, '');
+};
 
 const UserCard = ({ user, onChatClick, showActions = true, compact = false }) => {
   const navigate = useNavigate();
   const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('idle');
 
   // Default placeholder data if user prop is incomplete
   const userData = {
     id: user?.id || '',
     slug: user?.slug || '',
-    name: user?.name || 'Anonymous User',
+    fullName:
+      sanitizeName(user?.fullName) ||
+      sanitizeName(user?.full_name) ||
+      sanitizeName(user?.name) ||
+      sanitizeName(user?.displayName) ||
+      '',
+    username:
+      sanitizeUsername(user?.username) ||
+      sanitizeUsername(user?.handle) ||
+      sanitizeUsername(user?.slug) ||
+      '',
+    name: sanitizeName(user?.name) || 'Anonymous User',
     tagline: user?.tagline || 'AI Assistant',
     description: user?.description || 'A helpful AI assistant ready to chat with you.',
     avatarUrl: user?.avatarUrl || user?.avatar_url || null,
@@ -30,15 +61,38 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
     ...user
   };
 
+  if (!userData.name || userData.name === 'Anonymous User') {
+    const fallbackName = userData.fullName || (userData.username ? userData.username.replace(/[_-]/g, ' ') : 'Aura Assistant');
+    userData.name = fallbackName;
+  }
+  if (!userData.avatar || userData.avatar === 'A') {
+    const avatarSource = userData.fullName || userData.name || userData.username;
+    if (avatarSource) {
+      userData.avatar = avatarSource.toString().charAt(0).toUpperCase();
+    }
+  }
+
+  const shareUrl = useMemo(() => {
+    const slug = userData.slug || userData.username;
+    if (!slug) {
+      return '';
+    }
+    return `https://www.iaura.ai/chat/${slug}`;
+  }, [userData.slug, userData.username]);
+
   /**
    * Handle starting a chat with this user
    */
   const handleChatClick = (e) => {
     e.stopPropagation();
+    const targetSlug = userData.slug || userData.username;
+    if (!targetSlug) {
+      return;
+    }
     if (onChatClick) {
       onChatClick(userData);
     } else {
-      navigate(`/chat/${userData.slug}`);
+      navigate(`/chat/${targetSlug}`);
     }
   };
 
@@ -46,7 +100,10 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
    * Handle viewing user profile
    */
   const handleViewProfile = () => {
-    navigate(`/profile/${userData.slug}`);
+    const targetSlug = userData.slug || userData.username;
+    if (targetSlug) {
+      navigate(`/profile/${targetSlug}`);
+    }
   };
 
   /**
@@ -60,6 +117,15 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
   useEffect(() => {
     setImageError(false);
   }, [userData.avatarUrl, userData.id]);
+
+  useEffect(() => {
+    if (copyStatus === 'idle') {
+      return undefined;
+    }
+
+    const timeout = setTimeout(() => setCopyStatus('idle'), 2500);
+    return () => clearTimeout(timeout);
+  }, [copyStatus]);
 
   /**
    * Get status indicator color
@@ -108,6 +174,18 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
     );
   };
 
+  const handleShareProfile = async (event) => {
+    event.stopPropagation();
+
+    if (!shareUrl) {
+      setCopyStatus('error');
+      return;
+    }
+
+    const success = await copyTextToClipboard(shareUrl);
+    setCopyStatus(success ? 'copied' : 'error');
+  };
+
   // Compact card for smaller spaces
   if (compact) {
     return (
@@ -131,7 +209,8 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
         </div>
         
         <div className="card-info">
-          <h4>{userData.name}</h4>
+          <h4>{userData.fullName || userData.name}</h4>
+          {userData.username && <span className="compact-username">@{userData.username}</span>}
           <p>{userData.tagline}</p>
           <span className="last-active">{formatLastActive()}</span>
         </div>
@@ -162,7 +241,7 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
           {!imageError && userData.avatarUrl ? (
             <img
               src={userData.avatarUrl}
-              alt={userData.name}
+              alt={userData.fullName || userData.name}
               className="user-avatar"
               onError={() => setImageError(true)}
             />
@@ -189,7 +268,10 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
 
         <div className="user-info">
           <div className="name-section">
-            <h3>{userData.name}</h3>
+            <div className="name-stack">
+              <h3>{userData.fullName || userData.name}</h3>
+              {userData.username && <span className="user-username">@{userData.username}</span>}
+            </div>
             <span className="personality-indicator">
               {getPersonalityLabel(userData.personality)}
             </span>
@@ -249,7 +331,19 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
       {/* Card Footer */}
       {showActions && (
         <div className="card-footer">
-          <button 
+          <button
+            type="button"
+            className={`btn secondary share-btn ${copyStatus === 'copied' ? 'copied' : ''}`}
+            onClick={handleShareProfile}
+            disabled={!shareUrl}
+          >
+            {copyStatus === 'copied'
+              ? 'Link Copied!'
+              : copyStatus === 'error'
+              ? 'Copy Failed'
+              : 'Share Assistant'}
+          </button>
+          <button
             className="btn secondary"
             onClick={handleViewProfile}
           >

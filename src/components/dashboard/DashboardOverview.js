@@ -1,4 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  getUserDisplayName,
+  getUserProfileUrl,
+  getUserUsername
+} from '../../utils/userDisplay';
+import { copyTextToClipboard } from '../../utils/clipboard';
 
 const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
   const {
@@ -9,6 +15,31 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
     uniqueTagCount = 0,
     recentActivity = []
   } = dashboardData || {};
+
+  const [copyStatus, setCopyStatus] = useState('idle');
+
+  const displayName = getUserDisplayName(user);
+  const username = getUserUsername(user);
+  const profileUrl = useMemo(() => getUserProfileUrl(user), [user]);
+
+  useEffect(() => {
+    if (copyStatus === 'idle') {
+      return undefined;
+    }
+
+    const timeout = setTimeout(() => setCopyStatus('idle'), 2500);
+    return () => clearTimeout(timeout);
+  }, [copyStatus]);
+
+  const handleCopyProfileLink = async () => {
+    if (!profileUrl) {
+      setCopyStatus('error');
+      return;
+    }
+
+    const success = await copyTextToClipboard(profileUrl);
+    setCopyStatus(success ? 'copied' : 'error');
+  };
 
   const trainingItems = totalQAPairs + totalLogicNotes;
   const knowledgeSources = totalDocuments;
@@ -90,15 +121,39 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
         <div>
           <h2>Dashboard Overview</h2>
           <p>
-            Welcome back{user?.user_metadata?.full_name ? `, ${user.user_metadata.full_name.split(' ')[0]}` : ''}! Track your
-            training footprint and recent activity at a glance.
+            Welcome back, {displayName.split(' ')[0] || 'User'}! Track your training footprint and recent activity at a glance.
           </p>
         </div>
-        {onRefresh && (
-          <button className="refresh-btn" onClick={onRefresh}>
-            Refresh data
-          </button>
-        )}
+        <div className="overview-actions">
+          <div className="share-profile">
+            <div className="share-text">
+              <span className="share-label">Share your dashboard</span>
+              <span className="share-value">
+                {profileUrl || 'Complete your profile to unlock sharing'}
+              </span>
+              {username && (
+                <span className="share-username">@{username}</span>
+              )}
+            </div>
+            <button
+              type="button"
+              className={`share-button ${copyStatus}`}
+              onClick={handleCopyProfileLink}
+              disabled={!profileUrl}
+            >
+              {copyStatus === 'copied'
+                ? 'Link Copied!'
+                : copyStatus === 'error'
+                ? 'Copy Failed'
+                : 'Copy Dashboard Link'}
+            </button>
+          </div>
+          {onRefresh && (
+            <button className="refresh-btn" onClick={onRefresh}>
+              Refresh data
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="stats-grid">
@@ -163,6 +218,7 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
           align-items: flex-start;
           justify-content: space-between;
           gap: var(--space-6);
+          flex-wrap: wrap;
         }
 
         .overview-header h2 {
@@ -177,6 +233,80 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
           max-width: 640px;
         }
 
+        .overview-actions {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: var(--space-3);
+          flex: 1;
+          min-width: 260px;
+        }
+
+        .share-profile {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--space-4);
+          background: var(--gray-100);
+          border-radius: var(--radius-lg);
+          padding: var(--space-3) var(--space-4);
+          width: 100%;
+        }
+
+        .share-text {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .share-label {
+          font-size: var(--text-xs);
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: var(--gray-500);
+        }
+
+        .share-value {
+          font-family: 'Menlo', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+          font-size: var(--text-sm);
+          color: var(--gray-800);
+          word-break: break-all;
+        }
+
+        .share-username {
+          font-size: var(--text-xs);
+          color: var(--primary-600);
+        }
+
+        .share-button {
+          border: none;
+          background: var(--primary-600);
+          color: var(--white);
+          padding: var(--space-2) var(--space-4);
+          border-radius: var(--radius-md);
+          font-weight: var(--font-weight-medium);
+          cursor: pointer;
+          transition: background-color var(--transition-fast);
+        }
+
+        .share-button:hover:not(:disabled) {
+          background: var(--primary-500);
+        }
+
+        .share-button:disabled {
+          background: var(--gray-300);
+          color: var(--gray-600);
+          cursor: not-allowed;
+        }
+
+        .share-button.copied {
+          background: var(--green-500, #10b981);
+        }
+
+        .share-button.error {
+          background: var(--red-500, #ef4444);
+        }
+
         .refresh-btn {
           border: none;
           background: var(--gray-200);
@@ -189,6 +319,23 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
 
         .refresh-btn:hover {
           background: var(--gray-300);
+        }
+
+        @media (max-width: 768px) {
+          .overview-actions {
+            align-items: stretch;
+            min-width: 100%;
+          }
+
+          .share-profile {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .share-button {
+            width: 100%;
+            text-align: center;
+          }
         }
 
         .stats-grid {

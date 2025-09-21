@@ -1,11 +1,12 @@
 // Aura Voice AI - Individual Profile & Voice Chat Component
 // =========================================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { buildProfileSlug, isPermissionError, sanitizeSlug } from '../../utils/slugUtils';
+import { copyTextToClipboard } from '../../utils/clipboard';
 
 /**
  * VoiceChat Component
@@ -15,6 +16,23 @@ import { buildProfileSlug, isPermissionError, sanitizeSlug } from '../../utils/s
  * Connects to Supabase to fetch user data by slug
  */
 const PROFILE_BUCKET = process.env.REACT_APP_SUPABASE_AVATAR_BUCKET || 'avatars';
+const looksLikeEmail = (value) => /@/.test((value || '').toString());
+const sanitizeDisplayText = (value) => {
+  if (!value) {
+    return '';
+  }
+  const trimmed = value.toString().trim();
+  if (!trimmed || looksLikeEmail(trimmed)) {
+    return '';
+  }
+  return trimmed;
+};
+const sanitizeUsername = (value) => {
+  if (!value) {
+    return '';
+  }
+  return value.toString().trim().replace(/^@+/, '');
+};
 
 const VoiceChat = () => {
   const { slug } = useParams();
@@ -30,12 +48,21 @@ const VoiceChat = () => {
   const [questionInput, setQuestionInput] = useState('');
   const [avatarError, setAvatarError] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  const [shareStatus, setShareStatus] = useState('idle');
 
   useEffect(() => {
     if (isAuthenticated) {
       setShowLoginPrompt(false);
     }
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (shareStatus === 'idle') {
+      return undefined;
+    }
+    const timeout = setTimeout(() => setShareStatus('idle'), 2500);
+    return () => clearTimeout(timeout);
+  }, [shareStatus]);
 
   const getPublicAvatarUrl = useCallback((path) => {
     if (!path || !supabase) {
@@ -296,14 +323,19 @@ const VoiceChat = () => {
       const personaSettings = matchedUser.persona_settings || {};
       const profileDetails = profileRecord || null;
 
-      const displayName = (
-        personaSettings.display_name ||
-        personaSettings.name ||
-        profileDetails?.full_name ||
-        matchedUser.name ||
-        matchedUser.email?.split('@')[0] ||
-        'Aura Assistant'
-      ).toString().trim();
+      const displayName =
+        [
+          personaSettings.display_name,
+          personaSettings.name,
+          profileDetails?.full_name,
+          profileDetails?.display_name,
+          matchedUser.name
+        ]
+          .map(sanitizeDisplayText)
+          .find(Boolean) ||
+        sanitizeDisplayText(profileDetails?.username) ||
+        sanitizeDisplayText(matchedUser.email?.split('@')[0]) ||
+        'Aura Assistant';
 
       const resolvedSlug = buildProfileSlug({
         personaSettings,
@@ -328,6 +360,13 @@ const VoiceChat = () => {
         profileDetails?.avatar_url ||
         (profileDetails?.avatar_path ? getPublicAvatarUrl(profileDetails.avatar_path) : null);
 
+      const username = sanitizeUsername(
+        profileDetails?.username ||
+        personaSettings.username ||
+        matchedUser.username ||
+        matchedUser.email?.split('@')[0]
+      );
+
       const expertiseAreas = Array.isArray(preferences?.expertise_areas)
         ? preferences.expertise_areas.filter(Boolean)
         : [];
@@ -338,11 +377,13 @@ const VoiceChat = () => {
       const processedProfile = {
         id: matchedUser.user_id,
         name: displayName,
+        fullName: sanitizeDisplayText(profileDetails?.full_name) || sanitizeDisplayText(matchedUser.name) || displayName,
         slug: resolvedSlug,
         email: matchedUser.email || profileDetails?.email || null,
         tenantId: matchedUser.tenant_id,
         avatar: avatarInitials,
         avatarUrl,
+        username,
         title: profileDetails?.title || personaSettings.title || generateTitle(displayName, expertiseAreas),
         bio:
           personaSettings.bio?.toString().trim() ||
@@ -494,6 +535,23 @@ const VoiceChat = () => {
     setQuestionInput(question);
   };
 
+  const shareUrl = useMemo(() => {
+    if (!profile?.slug) {
+      return '';
+    }
+    return `https://www.iaura.ai/chat/${profile.slug}`;
+  }, [profile?.slug]);
+
+  const handleCopyShareLink = async () => {
+    if (!shareUrl) {
+      setShareStatus('error');
+      return;
+    }
+
+    const success = await copyTextToClipboard(shareUrl);
+    setShareStatus(success ? 'copied' : 'error');
+  };
+
   // Handle text chat submission
   const handleChatSubmit = async (e) => {
     e.preventDefault();
@@ -608,7 +666,7 @@ const VoiceChat = () => {
                 {!avatarError && profile.avatarUrl ? (
                   <img
                     src={profile.avatarUrl}
-                    alt={profile.name}
+                    alt={profile.fullName || profile.name}
                     onError={() => setAvatarError(true)}
                   />
                 ) : (
@@ -621,12 +679,15 @@ const VoiceChat = () => {
                 </div>
               )}
             </div>
-            
+
             <div className="profile-details">
               <h1 className="profile-name">
-                {profile.name}
+                {profile.fullName || profile.name}
                 {profile.isVerified && <span className="verified-text">✓</span>}
               </h1>
+              {profile.username && (
+                <p className="profile-username">@{profile.username}</p>
+              )}
               <p className="profile-title">{profile.title}</p>
               <p className="profile-bio">{profile.bio}</p>
               
@@ -669,6 +730,27 @@ const VoiceChat = () => {
             </button>
             <button className="btn btn-secondary btn-lg">
               Open Chat
+            </button>
+          </div>
+
+          <div className="profile-share">
+            <div className="share-text">
+              <span className="share-label">Share this assistant</span>
+              <span className="share-link">
+                {shareUrl || 'Update this profile to unlock sharing'}
+              </span>
+            </div>
+            <button
+              type="button"
+              className={`share-button ${shareStatus}`}
+              onClick={handleCopyShareLink}
+              disabled={!shareUrl}
+            >
+              {shareStatus === 'copied'
+                ? 'Link Copied!'
+                : shareStatus === 'error'
+                ? 'Copy Failed'
+                : 'Copy Chat Link'}
             </button>
           </div>
 
@@ -889,6 +971,12 @@ const VoiceChat = () => {
           gap: var(--space-2);
         }
 
+        .profile-username {
+          font-size: var(--text-base);
+          color: var(--gray-500);
+          margin-bottom: var(--space-2);
+        }
+
         .verified-text {
           color: var(--success-500);
           font-size: var(--text-2xl);
@@ -953,6 +1041,68 @@ const VoiceChat = () => {
           flex-direction: column;
           gap: var(--space-3);
           flex-shrink: 0;
+        }
+
+        .profile-share {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--space-4);
+          padding: var(--space-4);
+          background: var(--gray-50);
+          border: 1px solid var(--gray-200);
+          border-radius: var(--radius-xl);
+          flex-basis: 100%;
+          margin-top: var(--space-4);
+        }
+
+        .profile-share .share-text {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .profile-share .share-label {
+          font-size: var(--text-sm);
+          font-weight: var(--font-weight-medium);
+          color: var(--gray-600);
+        }
+
+        .profile-share .share-link {
+          font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+          font-size: var(--text-sm);
+          color: var(--gray-800);
+          word-break: break-all;
+        }
+
+        .profile-share .share-button {
+          border: none;
+          background: var(--primary-600);
+          color: var(--white);
+          padding: var(--space-2) var(--space-4);
+          border-radius: var(--radius-lg);
+          font-weight: var(--font-weight-semibold);
+          cursor: pointer;
+          transition: background var(--transition-fast), transform var(--transition-fast);
+          min-width: 170px;
+        }
+
+        .profile-share .share-button:hover:not(:disabled) {
+          background: var(--primary-700);
+          transform: translateY(-1px);
+        }
+
+        .profile-share .share-button:disabled {
+          background: var(--gray-300);
+          cursor: not-allowed;
+        }
+
+        .profile-share .share-button.copied {
+          background: var(--success-500);
+        }
+
+        .profile-share .share-button.error {
+          background: var(--error-500);
         }
 
         .call-login-prompt {
@@ -1189,6 +1339,25 @@ const VoiceChat = () => {
             flex-direction: column;
             align-items: center;
             text-align: center;
+          }
+
+          .profile-actions {
+            width: 100%;
+            align-items: stretch;
+          }
+
+          .profile-share {
+            flex-direction: column;
+            align-items: stretch;
+            text-align: center;
+          }
+
+          .profile-share .share-text {
+            align-items: center;
+          }
+
+          .profile-share .share-button {
+            width: 100%;
           }
 
           .profile-stats {
