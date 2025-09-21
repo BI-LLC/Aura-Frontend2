@@ -63,7 +63,7 @@ const ExplorePage = () => {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, full_name, username, email, bio, title, avatar_url, avatar_path, created_at')
+        .select('id, full_name, username, email, bio, title, avatar_path, created_at')
         .order('created_at', { ascending: false })
         .limit(100);
 
@@ -149,7 +149,7 @@ const ExplorePage = () => {
       }
 
       if (!tenantUsers || tenantUsers.length === 0) {
-        setChatbots([]);
+        await fetchProfilesDirectory();
         setError(null);
         return;
       }
@@ -184,7 +184,7 @@ const ExplorePage = () => {
             .in('user_id', userIds),
           supabase
             .from('profiles')
-            .select('id, username, full_name, email, bio, title, avatar_url, avatar_path, created_at')
+            .select('id, username, full_name, email, bio, title, avatar_path, created_at')
             .in('id', userIds)
         ]);
 
@@ -351,8 +351,12 @@ const ExplorePage = () => {
         };
       });
 
-      setChatbots(processedChatbots);
-      setError(null);
+      if (processedChatbots.length === 0) {
+        await fetchProfilesDirectory();
+      } else {
+        setChatbots(processedChatbots);
+        setError(null);
+      }
     } catch (err) {
       setError('Failed to load chatbots. Please try again.');
       console.error('Error fetching chatbots:', err);
