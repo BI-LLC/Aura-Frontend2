@@ -767,7 +767,7 @@ const VoiceChat = () => {
         </div>
 
         {/* Main Content */}
-        <div className="main-content">
+        <div className="voice-chat-content">
           {/* Suggested Questions */}
           <div className="suggested-questions">
             <h3 className="section-title">Suggested Questions</h3>
@@ -1142,7 +1142,7 @@ const VoiceChat = () => {
         }
 
         /* Main Content */
-        .main-content {
+        .voice-chat-content {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: var(--space-8);
@@ -1362,7 +1362,7 @@ const VoiceChat = () => {
             justify-content: center;
           }
 
-          .main-content {
+          .voice-chat-content {
             grid-template-columns: 1fr;
           }
 
