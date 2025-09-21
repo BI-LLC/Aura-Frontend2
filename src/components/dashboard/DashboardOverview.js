@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   getUserDisplayName,
-  getUserProfileSlug,
   getUserProfileUrl,
   getUserUsername
 } from '../../utils/userDisplay';
@@ -21,9 +20,7 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
 
   const displayName = getUserDisplayName(user);
   const username = getUserUsername(user);
-  const profileSlug = useMemo(() => getUserProfileSlug(user), [user]);
   const profileUrl = useMemo(() => getUserProfileUrl(user), [user]);
-  const relativeProfilePath = profileSlug ? `/profile/${profileSlug}` : '';
 
   useEffect(() => {
     if (copyStatus === 'idle') {
@@ -130,9 +127,9 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
         <div className="overview-actions">
           <div className="share-profile">
             <div className="share-text">
-              <span className="share-label">Share your profile</span>
+              <span className="share-label">Share your dashboard</span>
               <span className="share-value">
-                {relativeProfilePath || 'Complete your profile to unlock sharing'}
+                {profileUrl || 'Complete your profile to unlock sharing'}
               </span>
               {username && (
                 <span className="share-username">@{username}</span>
@@ -148,7 +145,7 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
                 ? 'Link Copied!'
                 : copyStatus === 'error'
                 ? 'Copy Failed'
-                : 'Copy Link'}
+                : 'Copy Dashboard Link'}
             </button>
           </div>
           {onRefresh && (

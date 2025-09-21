@@ -8,7 +8,8 @@ import {
   getUserDisplayName,
   getUserEmail,
   getUserInitials,
-  getUserUsername
+  getUserUsername,
+  getUserAvatarUrl
 } from '../../utils/userDisplay';
 
 /**
@@ -26,6 +27,7 @@ const Navbar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
   
   // Refs
   const userMenuRef = useRef(null);
@@ -91,10 +93,15 @@ const Navbar = () => {
   ];
 
   const navItems = isAuthenticated ? authenticatedNavItems : publicNavItems;
-  const displayName = getUserDisplayName(user);
+  const displayName = getUserDisplayName(user) || getUserEmail(user) || 'User';
   const displayEmail = getUserEmail(user);
   const username = getUserUsername(user);
   const avatarInitial = getUserInitials(user, 1);
+  const avatarUrl = getUserAvatarUrl(user);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [avatarUrl, user?.id]);
 
   return (
     <>
@@ -134,7 +141,15 @@ const Navbar = () => {
                     className="user-menu-trigger"
                   >
                     <div className="user-avatar">
-                      {avatarInitial}
+                      {avatarUrl && !avatarError ? (
+                        <img
+                          src={avatarUrl}
+                          alt={displayName}
+                          onError={() => setAvatarError(true)}
+                        />
+                      ) : (
+                        <span>{avatarInitial}</span>
+                      )}
                     </div>
                     <div className="user-menu-labels">
                       <span className="user-name">{displayName}</span>
@@ -162,7 +177,15 @@ const Navbar = () => {
                     <div className="user-menu-dropdown">
                       <div className="user-menu-header">
                         <div className="user-menu-avatar">
-                          {avatarInitial}
+                          {avatarUrl && !avatarError ? (
+                            <img
+                              src={avatarUrl}
+                              alt={displayName}
+                              onError={() => setAvatarError(true)}
+                            />
+                          ) : (
+                            <span>{avatarInitial}</span>
+                          )}
                         </div>
                         <div className="user-menu-info">
                           <div className="user-menu-name">{displayName}</div>
@@ -242,7 +265,15 @@ const Navbar = () => {
                   <div className="mobile-user-section">
                     <div className="mobile-user-info">
                       <div className="mobile-user-avatar">
-                        {avatarInitial}
+                        {avatarUrl && !avatarError ? (
+                          <img
+                            src={avatarUrl}
+                            alt={displayName}
+                            onError={() => setAvatarError(true)}
+                          />
+                        ) : (
+                          <span>{avatarInitial}</span>
+                        )}
                       </div>
                       <div>
                         <div className="mobile-user-name">{displayName}</div>
@@ -409,6 +440,7 @@ const Navbar = () => {
           color: var(--white);
           font-weight: var(--font-weight-semibold);
           font-size: var(--text-sm);
+          overflow: hidden;
         }
 
         .user-menu-labels {
@@ -469,6 +501,7 @@ const Navbar = () => {
           font-weight: var(--font-weight-semibold);
           font-size: var(--text-lg);
           flex-shrink: 0;
+          overflow: hidden;
         }
 
         .user-menu-info {
@@ -654,6 +687,17 @@ const Navbar = () => {
           color: var(--white);
           font-weight: var(--font-weight-semibold);
           flex-shrink: 0;
+          overflow: hidden;
+        }
+
+        .user-avatar img,
+        .user-menu-avatar img,
+        .mobile-user-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          border-radius: 50%;
+          display: block;
         }
 
         .mobile-user-name {

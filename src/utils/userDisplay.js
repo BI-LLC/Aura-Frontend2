@@ -3,6 +3,7 @@ import { sanitizeSlug } from './slugUtils';
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
 
 const getMetadata = (user) => user?.user_metadata || {};
+const looksLikeEmail = (value) => /@/.test(value || '');
 
 export const getUserEmail = (user) => {
   const metadata = getMetadata(user);
@@ -30,11 +31,38 @@ export const getUserDisplayName = (user) => {
 
   for (const candidate of candidates) {
     if (isNonEmptyString(candidate)) {
-      return candidate.trim();
+      const trimmed = candidate.trim();
+      if (looksLikeEmail(trimmed)) {
+        continue;
+      }
+      return trimmed;
     }
   }
 
   return 'User';
+};
+
+export const getUserFullName = (user) => {
+  const metadata = getMetadata(user);
+  const candidates = [
+    metadata.full_name,
+    metadata.display_name,
+    metadata.name,
+    metadata.preferred_name,
+    user?.name
+  ];
+
+  for (const candidate of candidates) {
+    if (isNonEmptyString(candidate)) {
+      const trimmed = candidate.trim();
+      if (looksLikeEmail(trimmed)) {
+        continue;
+      }
+      return trimmed;
+    }
+  }
+
+  return '';
 };
 
 export const getUserUsername = (user) => {
@@ -131,11 +159,47 @@ export const getUserProfileUrl = (user) => {
   if (!slug) {
     return '';
   }
+  const baseUrl = 'https://www.iaura.ai';
+  return `${baseUrl}/chat/${slug}`;
+};
 
-  const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
-  if (origin) {
-    return `${origin}/profile/${slug}`;
+export const getUserAvatarUrl = (user) => {
+  const metadata = getMetadata(user);
+  const candidates = [
+    metadata.avatar_url,
+    metadata.avatarUrl,
+    metadata.profile_avatar_url,
+    metadata.profileAvatarUrl,
+    metadata.picture,
+    metadata.photo_url,
+    metadata.image_url,
+    metadata.profile_image_url,
+    metadata.profileImageUrl,
+    metadata.profile_picture,
+    metadata.profilePicture,
+    user?.avatar_url,
+    user?.avatarUrl,
+    user?.picture,
+    user?.user_metadata?.avatar_path_url
+  ];
+
+  for (const candidate of candidates) {
+    if (isNonEmptyString(candidate)) {
+      return candidate.trim();
+    }
   }
 
-  return `/profile/${slug}`;
+  const identityAvatar = user?.identities?.find((identity) => {
+    const avatarCandidate = identity?.identity_data?.avatar_url || identity?.identity_data?.picture;
+    return isNonEmptyString(avatarCandidate);
+  });
+
+  if (identityAvatar) {
+    const avatarCandidate = identityAvatar.identity_data.avatar_url || identityAvatar.identity_data.picture;
+    if (isNonEmptyString(avatarCandidate)) {
+      return avatarCandidate.trim();
+    }
+  }
+
+  return '';
 };

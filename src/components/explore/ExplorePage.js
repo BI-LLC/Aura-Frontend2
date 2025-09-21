@@ -14,6 +14,33 @@ import { buildProfileSlug, isPermissionError } from '../../utils/slugUtils';
  * Designed for Silicon Valley executives to discover AI personalities
  */
 const PROFILE_BUCKET = process.env.REACT_APP_SUPABASE_AVATAR_BUCKET || 'avatars';
+const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
+const looksLikeEmail = (value) => /@/.test((value || '').toString());
+const sanitizeDisplayText = (value) => {
+  if (!isNonEmptyString(value)) {
+    return '';
+  }
+  const trimmed = value.toString().trim();
+  if (!trimmed || looksLikeEmail(trimmed)) {
+    return '';
+  }
+  return trimmed;
+};
+const sanitizeUsername = (value) => {
+  if (!isNonEmptyString(value)) {
+    return '';
+  }
+  return value.toString().trim().replace(/^@+/, '');
+};
+const buildDisplayName = (...candidates) => {
+  for (const candidate of candidates) {
+    const sanitized = sanitizeDisplayText(candidate);
+    if (sanitized) {
+      return sanitized;
+    }
+  }
+  return 'Aura Assistant';
+};
 
 const ExplorePage = () => {
   // ✅ FIXED: Get both isAuthenticated and supabase at top level
@@ -72,9 +99,16 @@ const ExplorePage = () => {
       }
 
       const mappedProfiles = (data || []).map((profile) => {
-        const displayName = (profile.full_name || profile.username || 'Aura Assistant')
-          .toString()
-          .trim();
+        const username = sanitizeUsername(profile.username || profile.handle || profile.slug);
+        const displayName = buildDisplayName(
+          profile.full_name,
+          profile.display_name,
+          profile.name,
+          profile.preferred_name,
+          profile.username,
+          profile.email ? profile.email.split('@')[0] : ''
+        );
+        const fullName = sanitizeDisplayText(profile.full_name) || sanitizeDisplayText(profile.display_name) || '';
 
         const slug = buildProfileSlug({
           profile,
@@ -87,13 +121,15 @@ const ExplorePage = () => {
 
         return {
           id: profile.id,
-          name: displayName,
+          name: fullName || displayName,
+          fullName: fullName || displayName,
+          username,
           slug,
-          title: profile.title || `${displayName.split(' ')[0] || displayName}'s AI Assistant`,
+          title: profile.title || `${(fullName || displayName).split(' ')[0] || displayName}'s AI Assistant`,
           category: 'business',
           description: profile.bio || 'Professional AI assistant ready to help you.',
           bio: profile.bio || '',
-          avatar: displayName.charAt(0).toUpperCase(),
+          avatar: (fullName || displayName).charAt(0).toUpperCase(),
           avatarUrl,
           rating: 4.7,
           totalChats: 0,
@@ -240,23 +276,38 @@ const ExplorePage = () => {
         const profile = profileMap.get(user.user_id) || null;
         const userStats = statsMap.get(user.user_id) || [];
 
-        const displayName = (
-          personaSettings.display_name ||
-          personaSettings.name ||
-          profile?.full_name ||
-          user.name ||
-          user.email?.split('@')[0] ||
-          'Aura Assistant'
-        ).toString().trim();
+        const username = sanitizeUsername(
+          personaSettings.username ||
+          profile?.username ||
+          user.username ||
+          user.email?.split('@')[0]
+        );
+
+        const displayName = buildDisplayName(
+          personaSettings.display_name,
+          personaSettings.name,
+          profile?.full_name,
+          profile?.display_name,
+          user.name,
+          profile?.username,
+          user.email ? user.email.split('@')[0] : ''
+        );
+
+        const fullName = sanitizeDisplayText(profile?.full_name) ||
+          sanitizeDisplayText(personaSettings.display_name) ||
+          sanitizeDisplayText(user.name) ||
+          '';
+
+        const resolvedName = fullName || displayName;
 
         const slug = buildProfileSlug({
           personaSettings,
           profile,
-          fallbackName: displayName,
+          fallbackName: resolvedName,
           fallbackId: user.user_id
         });
 
-        const initials = displayName
+        const initials = resolvedName
           .split(' ')
           .filter(Boolean)
           .map(word => word.charAt(0))
@@ -325,9 +376,11 @@ const ExplorePage = () => {
 
         return {
           id: user.user_id,
-          name: displayName,
+          name: resolvedName,
+          fullName: fullName || displayName,
+          username,
           slug,
-          title: personaSettings.title || profile?.title || `${displayName.split(' ')[0] || displayName}'s AI Assistant`,
+          title: personaSettings.title || profile?.title || `${resolvedName.split(' ')[0] || resolvedName}'s AI Assistant`,
           category,
           description,
           bio: personaSettings.bio || profile?.bio || '',
