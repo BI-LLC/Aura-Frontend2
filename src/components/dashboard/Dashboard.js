@@ -11,6 +11,7 @@ import DashboardOverview from './DashboardOverview';
 import TrainingDashboard from './TrainingDashboard';
 import WidgetGenerator from './WidgetGenerator';
 import SettingsTab from './SettingsTab';
+import { getUserFullName } from '../../utils/userDisplay';
 
 /**
  * Main Dashboard Component
@@ -170,7 +171,7 @@ const Dashboard = () => {
           <div className="header-content">
             <div>
               <h1 className="dashboard-title">
-                Welcome back, {user?.user_metadata?.full_name?.split(' ')[0] || user?.email || 'User'}!
+                Welcome back, {getUserFullName(user) || user?.email || 'User'}!
               </h1>
               <p className="dashboard-subtitle">
                 Manage your AI assistant, review performance, and optimize your voice experience.

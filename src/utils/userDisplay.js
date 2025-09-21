@@ -65,6 +65,20 @@ export const getUserFullName = (user) => {
   return '';
 };
 
+export const formatPossessiveName = (name) => {
+  if (!isNonEmptyString(name)) {
+    return '';
+  }
+
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const suffix = /s$/i.test(trimmed) ? "'" : "'s";
+  return `${trimmed}${suffix}`;
+};
+
 export const getUserUsername = (user) => {
   const metadata = getMetadata(user);
   const candidates = [

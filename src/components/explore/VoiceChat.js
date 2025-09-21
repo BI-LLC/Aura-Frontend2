@@ -7,6 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { buildProfileSlug, isPermissionError, sanitizeSlug } from '../../utils/slugUtils';
 import { copyTextToClipboard } from '../../utils/clipboard';
+import { formatPossessiveName } from '../../utils/userDisplay';
 
 /**
  * VoiceChat Component
@@ -374,17 +375,22 @@ const VoiceChat = () => {
       const conversationsCount = conversations.length;
       const totalMessages = conversations.reduce((sum, conv) => sum + (conv.message_count || 0), 0);
 
+      const resolvedFullName =
+        sanitizeDisplayText(profileDetails?.full_name) ||
+        sanitizeDisplayText(matchedUser.name) ||
+        displayName;
+
       const processedProfile = {
         id: matchedUser.user_id,
-        name: displayName,
-        fullName: sanitizeDisplayText(profileDetails?.full_name) || sanitizeDisplayText(matchedUser.name) || displayName,
+        name: resolvedFullName,
+        fullName: resolvedFullName,
         slug: resolvedSlug,
         email: matchedUser.email || profileDetails?.email || null,
         tenantId: matchedUser.tenant_id,
         avatar: avatarInitials,
         avatarUrl,
         username,
-        title: profileDetails?.title || personaSettings.title || generateTitle(displayName, expertiseAreas),
+        title: profileDetails?.title || personaSettings.title || generateTitle(resolvedFullName),
         bio:
           personaSettings.bio?.toString().trim() ||
           personaSettings.description?.toString().trim() ||
@@ -430,25 +436,10 @@ const VoiceChat = () => {
 
 
   // Generate title from name and expertise
-  const generateTitle = (name, expertiseAreas) => {
-    const firstName = name.split(' ')[0];
-    if (!expertiseAreas || expertiseAreas.length === 0) {
-      return `${firstName}'s AI Assistant`;
-    }
-    
-    const primaryExpertise = expertiseAreas[0];
-    const titleMap = {
-      'business': 'Business Advisor',
-      'finance': 'Financial Consultant', 
-      'healthcare': 'Health & Wellness Coach',
-      'technology': 'Tech Expert',
-      'education': 'Learning Mentor',
-      'customer-service': 'Support Specialist',
-      'marketing': 'Marketing Strategist',
-      'legal': 'Legal Advisor'
-    };
-    
-    return titleMap[primaryExpertise] || `${primaryExpertise.charAt(0).toUpperCase() + primaryExpertise.slice(1)} Expert`;
+  const generateTitle = (name) => {
+    const baseName = sanitizeDisplayText(name) || 'Aura Assistant';
+    const possessive = formatPossessiveName(baseName) || formatPossessiveName('Aura Assistant');
+    return `${possessive || "Aura Assistant's"} AI Assistant`;
   };
 
   // Generate bio from preferences and persona

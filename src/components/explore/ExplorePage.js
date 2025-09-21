@@ -6,6 +6,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { buildProfileSlug, isPermissionError } from '../../utils/slugUtils';
+import { formatPossessiveName } from '../../utils/userDisplay';
 
 /**
  * ExplorePage Component
@@ -40,6 +41,17 @@ const buildDisplayName = (...candidates) => {
     }
   }
   return 'Aura Assistant';
+};
+
+const buildAssistantTitle = (name) => {
+  const baseName = sanitizeDisplayText(name) || 'Aura Assistant';
+  const possessive = formatPossessiveName(baseName);
+  if (possessive) {
+    return `${possessive} AI Assistant`;
+  }
+
+  const fallbackPossessive = formatPossessiveName('Aura Assistant');
+  return `${fallbackPossessive || 'Aura Assistant'} AI Assistant`;
 };
 
 const ExplorePage = () => {
@@ -125,7 +137,7 @@ const ExplorePage = () => {
           fullName: fullName || displayName,
           username,
           slug,
-          title: profile.title || `${(fullName || displayName).split(' ')[0] || displayName}'s AI Assistant`,
+          title: profile.title || buildAssistantTitle(fullName || displayName),
           category: 'business',
           description: profile.bio || 'Professional AI assistant ready to help you.',
           bio: profile.bio || '',
@@ -380,7 +392,7 @@ const ExplorePage = () => {
           fullName: fullName || displayName,
           username,
           slug,
-          title: personaSettings.title || profile?.title || `${resolvedName.split(' ')[0] || resolvedName}'s AI Assistant`,
+          title: personaSettings.title || profile?.title || buildAssistantTitle(fullName || resolvedName),
           category,
           description,
           bio: personaSettings.bio || profile?.bio || '',

@@ -9,7 +9,8 @@ import {
   getUserEmail,
   getUserInitials,
   getUserUsername,
-  getUserAvatarUrl
+  getUserAvatarUrl,
+  getUserFullName
 } from '../../utils/userDisplay';
 
 /**
@@ -93,7 +94,8 @@ const Navbar = () => {
   ];
 
   const navItems = isAuthenticated ? authenticatedNavItems : publicNavItems;
-  const displayName = getUserDisplayName(user) || getUserEmail(user) || 'User';
+  const fullName = getUserFullName(user);
+  const displayName = fullName || getUserDisplayName(user) || getUserEmail(user) || 'User';
   const displayEmail = getUserEmail(user);
   const username = getUserUsername(user);
   const avatarInitial = getUserInitials(user, 1);

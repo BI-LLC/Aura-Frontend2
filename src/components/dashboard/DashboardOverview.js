@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   getUserDisplayName,
+  getUserFullName,
   getUserProfileUrl,
   getUserUsername
 } from '../../utils/userDisplay';
@@ -18,6 +19,7 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
 
   const [copyStatus, setCopyStatus] = useState('idle');
 
+  const fullName = getUserFullName(user);
   const displayName = getUserDisplayName(user);
   const username = getUserUsername(user);
   const profileUrl = useMemo(() => getUserProfileUrl(user), [user]);
@@ -121,13 +123,13 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
         <div>
           <h2>Dashboard Overview</h2>
           <p>
-            Welcome back, {displayName.split(' ')[0] || 'User'}! Track your training footprint and recent activity at a glance.
+            Welcome back, {fullName || displayName || 'User'}! Track your training footprint and recent activity at a glance.
           </p>
         </div>
         <div className="overview-actions">
           <div className="share-profile">
             <div className="share-text">
-              <span className="share-label">Share your dashboard</span>
+              <span className="share-label">Share your AI Voice</span>
               <span className="share-value">
                 {profileUrl || 'Complete your profile to unlock sharing'}
               </span>
@@ -145,7 +147,7 @@ const DashboardOverview = ({ user, dashboardData, onRefresh }) => {
                 ? 'Link Copied!'
                 : copyStatus === 'error'
                 ? 'Copy Failed'
-                : 'Copy Dashboard Link'}
+                : 'Copy AI Voice Link'}
             </button>
           </div>
           {onRefresh && (
