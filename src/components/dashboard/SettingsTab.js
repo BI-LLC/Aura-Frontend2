@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Alert from '../common/Alert';
 import LoadingSpinner from '../common/LoadingSpinner';
 
-const PROFILE_BUCKET = 'profile-avatars';
+const PROFILE_BUCKET = process.env.REACT_APP_SUPABASE_AVATAR_BUCKET || 'avatars';
 
 const getInitialProfile = (currentUser) => {
   const metadata = currentUser?.user_metadata || {};
@@ -295,7 +295,15 @@ const SettingsTab = ({ user, supabase }) => {
 
       showAlert('Profile photo updated.', 'success');
     } catch (error) {
-      showAlert(error.message || 'Unable to upload profile photo.', 'error');
+      const errorMessage = error?.message || 'Unable to upload profile photo.';
+      if (errorMessage.toLowerCase().includes('bucket not found')) {
+        showAlert(
+          `Avatar storage bucket "${PROFILE_BUCKET}" was not found. Please create it in Supabase storage and make sure it is public.`,
+          'error'
+        );
+      } else {
+        showAlert(errorMessage, 'error');
+      }
     } finally {
       event.target.value = '';
     }
