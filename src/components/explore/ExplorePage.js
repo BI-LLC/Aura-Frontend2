@@ -1,7 +1,7 @@
 // Aura Voice AI - Explore Page Component
 // ====================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -42,137 +42,171 @@ const ExplorePage = () => {
     { id: 'name', label: 'Name A-Z' }
   ];
 
-  // Fetch chatbots on component mount
-  useEffect(() => {
-    fetchChatbots();
-  }, []);
-
-  // Fetch real chatbots from Supabase
-  const fetchChatbots = async () => {
+  const fetchChatbots = useCallback(async () => {
     try {
       setLoading(true);
-      
-      // ✅ FIXED: Use supabase from top-level destructuring, no useAuth() call here
+
       if (!supabase) {
-        throw new Error('Supabase client not available');
+        setChatbots([]);
+        setLoading(false);
+        return;
       }
 
-      // Query tenant_users with their personas and preferences
-      const { data: users, error: usersError } = await supabase
+      const { data: tenantUsers, error: usersError } = await supabase
         .from('tenant_users')
-        .select(`
-          user_id,
-          name,
-          email,
-          role,
-          created_at,
-          tenant_id,
-          user_preferences (
-            communication_style,
-            response_pace,
-            expertise_areas,
-            preferred_examples
-          ),
-          user_personas (
-            formality,
-            detail_level,
-            example_style,
-            questioning,
-            energy,
-            confidence,
-            sessions_count,
-            last_updated
-          )
-        `)
-        .eq('role', 'user')
-        .eq('is_active', true);
+        .select('user_id, tenant_id, email, name, role, persona_settings, voice_preference, created_at');
 
       if (usersError) {
         throw usersError;
       }
 
-      // Get conversation counts and ratings from conversation_summaries
-      const { data: stats, error: statsError } = await supabase
-        .from('conversation_summaries')
-        .select('user_id, session_id')
-        .order('timestamp', { ascending: false });
-
-      if (statsError) {
-        console.warn('Failed to fetch conversation stats:', statsError);
+      if (!tenantUsers || tenantUsers.length === 0) {
+        setChatbots([]);
+        setError(null);
+        return;
       }
 
-      // Process the data to match our chatbot format
-      const processedChatbots = users.map(user => {
-        const userStats = stats?.filter(stat => stat.user_id === user.user_id) || [];
-        const totalChats = userStats.length;
-        const persona = user.user_personas;
-        const preferences = user.user_preferences;
-        
-        // Generate slug from name
-        const slug = user.name.toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-+|-+$/g, '');
+      const userIds = tenantUsers
+        .map(user => user.user_id)
+        .filter(Boolean);
 
-        // Generate avatar initials
-        const avatar = user.name
+      let personas = [];
+      let preferences = [];
+      let stats = [];
+
+      if (userIds.length > 0) {
+        const [{ data: personaData, error: personaError }, { data: preferenceData, error: preferenceError }, { data: statsData, error: statsError }] = await Promise.all([
+          supabase
+            .from('user_personas')
+            .select('user_id, tenant_id, formality, detail_level, example_style, questioning, energy, confidence, sessions_count, last_updated')
+            .in('user_id', userIds),
+          supabase
+            .from('user_preferences')
+            .select('user_id, communication_style, response_pace, expertise_areas, preferred_examples')
+            .in('user_id', userIds),
+          supabase
+            .from('conversation_summaries')
+            .select('user_id, session_id, message_count, timestamp')
+            .in('user_id', userIds)
+        ]);
+
+        if (personaError) throw personaError;
+        if (preferenceError) throw preferenceError;
+        if (statsError) {
+          console.warn('Failed to fetch conversation stats:', statsError);
+        }
+
+        personas = personaData || [];
+        preferences = preferenceData || [];
+        stats = statsData || [];
+      }
+
+      const personaMap = new Map(personas.map(item => [item.user_id, item]));
+      const preferencesMap = new Map(preferences.map(item => [item.user_id, item]));
+
+      const statsMap = stats.reduce((acc, item) => {
+        if (!acc.has(item.user_id)) {
+          acc.set(item.user_id, []);
+        }
+        acc.get(item.user_id).push(item);
+        return acc;
+      }, new Map());
+
+      const processedChatbots = tenantUsers.map(user => {
+        const personaSettings = user.persona_settings || {};
+        const persona = personaMap.get(user.user_id) || null;
+        const preference = preferencesMap.get(user.user_id) || null;
+        const userStats = statsMap.get(user.user_id) || [];
+
+        const displayName = (personaSettings.display_name || personaSettings.name || user.name || user.email?.split('@')[0] || 'Aura Assistant').toString().trim();
+
+        const slug = displayName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '') || 'aura-assistant';
+
+        const initials = displayName
           .split(' ')
+          .filter(Boolean)
           .map(word => word.charAt(0))
           .join('')
           .toUpperCase()
-          .substring(0, 2);
+          .substring(0, 2) || 'AA';
 
-        // Determine category based on expertise areas
-        let category = 'business'; // default
-        const expertiseAreas = preferences?.expertise_areas || [];
-        if (expertiseAreas.includes('healthcare') || expertiseAreas.includes('medical')) {
+        const avatarUrl = personaSettings.avatar_url || personaSettings.avatarUrl || personaSettings.profile_picture || personaSettings.photo_url || null;
+
+        const expertiseAreas = Array.isArray(preference?.expertise_areas)
+          ? preference.expertise_areas.filter(Boolean)
+          : [];
+        const personaTags = Array.isArray(personaSettings.tags)
+          ? personaSettings.tags.filter(Boolean)
+          : [];
+        const combinedTags = Array.from(new Set([...expertiseAreas, ...personaTags]));
+
+        let category = personaSettings.category || 'business';
+        const normalizedTags = combinedTags.map(tag => tag.toLowerCase());
+        if (normalizedTags.some(tag => ['healthcare', 'medical', 'medicine'].includes(tag))) {
           category = 'healthcare';
-        } else if (expertiseAreas.includes('technology') || expertiseAreas.includes('tech')) {
+        } else if (normalizedTags.some(tag => ['technology', 'tech', 'engineering'].includes(tag))) {
           category = 'tech';
-        } else if (expertiseAreas.includes('education') || expertiseAreas.includes('teaching')) {
+        } else if (normalizedTags.some(tag => ['education', 'teaching', 'learning'].includes(tag))) {
           category = 'education';
-        } else if (expertiseAreas.includes('support') || expertiseAreas.includes('customer-service')) {
+        } else if (normalizedTags.some(tag => ['support', 'customer-service', 'service', 'cx'].includes(tag))) {
           category = 'customer-service';
+        } else if (normalizedTags.some(tag => ['finance', 'business', 'sales'].includes(tag))) {
+          category = 'business';
         }
 
-        // Generate description from persona and preferences
-        let description = `Professional AI assistant`;
-        if (preferences?.communication_style) {
-          description += ` with ${preferences.communication_style} communication style`;
-        }
-        if (expertiseAreas.length > 0) {
-          description += `. Specializing in ${expertiseAreas.slice(0, 3).join(', ')}.`;
+        let description = (personaSettings.bio || personaSettings.description || '').toString().trim();
+        if (!description) {
+          const communication = preference?.communication_style ? `${preference.communication_style} communication style` : null;
+          const expertiseText = combinedTags.length > 0 ? `Specializing in ${combinedTags.slice(0, 3).join(', ')}.` : null;
+          description = ['Professional AI assistant', communication, expertiseText].filter(Boolean).join(' ');
         }
 
-        // Calculate mock rating based on confidence and sessions
-        const confidence = persona?.confidence || 0.8;
-        const sessionsCount = persona?.sessions_count || 0;
-        const rating = Math.min(5.0, Math.max(3.0, (confidence * 5) + (sessionsCount > 10 ? 0.2 : 0)));
+        const totalChats = userStats.length;
+        const averageMessages = totalChats === 0
+          ? 0
+          : Math.round(userStats.reduce((sum, stat) => sum + (stat.message_count || 0), 0) / totalChats);
 
-        // Calculate response time based on response_pace
-        let responseTime = 1.5; // default
-        if (preferences?.response_pace === 'fast') responseTime = 0.9;
-        if (preferences?.response_pace === 'slow') responseTime = 2.1;
+        const confidence = persona?.confidence ?? 0.8;
+        const sessionsCount = persona?.sessions_count ?? totalChats;
+        const ratingBase = confidence * 5;
+        const rating = Math.min(5, Math.max(3, ratingBase + (sessionsCount > 10 ? 0.2 : 0)));
+
+        let responseTimeSeconds = 1.5;
+        if (preference?.response_pace === 'fast') responseTimeSeconds = 0.9;
+        if (preference?.response_pace === 'slow') responseTimeSeconds = 2.1;
+
+        const responseTimeLabel = responseTimeSeconds <= 1
+          ? '<1s'
+          : `${responseTimeSeconds.toFixed(1)}s`;
 
         return {
           id: user.user_id,
-          name: user.name,
-          slug: slug,
-          title: `${user.name.split(' ')[0]}'s AI Assistant`,
-          category: category,
-          description: description,
-          avatar: avatar,
+          name: displayName,
+          slug,
+          title: `${displayName.split(' ')[0] || displayName}'s AI Assistant`,
+          category,
+          description,
+          bio: personaSettings.bio || '',
+          avatar: initials,
+          avatarUrl,
           rating: parseFloat(rating.toFixed(1)),
-          totalChats: totalChats,
-          tags: expertiseAreas.slice(0, 3).map(tag => 
-            tag.charAt(0).toUpperCase() + tag.slice(1)
-          ),
-          isVerified: user.role === 'owner' || totalChats > 50,
+          totalChats,
+          averageMessages,
+          tags: combinedTags.slice(0, 3).map(tag => tag.charAt(0).toUpperCase() + tag.slice(1)),
+          categories: combinedTags.map(tag => tag.charAt(0).toUpperCase() + tag.slice(1)),
+          isVerified: ['owner', 'admin'].includes((user.role || '').toLowerCase()) || totalChats > 50,
           lastActive: persona?.last_updated || user.created_at,
-          responseTime: responseTime,
+          responseTime: responseTimeLabel,
+          responseTimeSeconds,
           email: user.email,
           tenantId: user.tenant_id,
-          confidence: persona?.confidence || 0.8,
-          sessionsCount: persona?.sessions_count || 0
+          confidence,
+          sessionsCount,
+          persona,
+          preferences: preference
         };
       });
 
@@ -181,8 +215,7 @@ const ExplorePage = () => {
     } catch (err) {
       setError('Failed to load chatbots. Please try again.');
       console.error('Error fetching chatbots:', err);
-      
-      // Fallback to empty array instead of showing error in production
+
       if (process.env.REACT_APP_ENVIRONMENT === 'production') {
         setChatbots([]);
         setError(null);
@@ -190,10 +223,14 @@ const ExplorePage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [supabase]);
+
+  useEffect(() => {
+    fetchChatbots();
+  }, [fetchChatbots]);
 
   // Filter and sort chatbots
-  const filteredAndSortedChatbots = React.useMemo(() => {
+  const filteredAndSortedChatbots = useMemo(() => {
     let filtered = [...chatbots];
 
     // Apply search filter
@@ -588,7 +625,11 @@ const ChatbotCard = ({ chatbot }) => {
       <div className="card-header">
         <div className="avatar-section">
           <div className="chatbot-avatar">
-            {chatbot.avatar}
+            {chatbot.avatarUrl ? (
+              <img src={chatbot.avatarUrl} alt={`${chatbot.name} avatar`} />
+            ) : (
+              <span>{chatbot.avatar}</span>
+            )}
           </div>
           <div className="verification-badge">
             {chatbot.isVerified && (
@@ -626,7 +667,7 @@ const ChatbotCard = ({ chatbot }) => {
         </div>
         <div className="stat-item">
           <span className="stat-label">Response Time</span>
-          <span className="stat-value">{chatbot.responseTime}s</span>
+          <span className="stat-value">{chatbot.responseTime}</span>
         </div>
         <div className="stat-item">
           <span className="stat-label">Last Active</span>
@@ -681,6 +722,21 @@ const ChatbotCard = ({ chatbot }) => {
           color: var(--white);
           font-size: var(--text-xl);
           font-weight: var(--font-weight-semibold);
+        }
+
+        .chatbot-avatar img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          border-radius: 50%;
+        }
+
+        .chatbot-avatar span {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          height: 100%;
         }
 
         .verification-badge {

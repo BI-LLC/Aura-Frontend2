@@ -12,7 +12,7 @@ import { useAuth } from '../../context/AuthContext';
  * Responsive design optimized for Silicon Valley professionals
  */
 const Navbar = () => {
-  const { user, isAuthenticated, logout, isLoading } = useAuth();
+  const { user, isAuthenticated, signOut, isLoading } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   
@@ -59,7 +59,7 @@ const Navbar = () => {
 
   // Handle logout
   const handleLogout = async () => {
-    await logout();
+    await signOut();
     setIsUserMenuOpen(false);
     navigate('/');
   };

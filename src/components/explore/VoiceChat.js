@@ -1,7 +1,7 @@
 // Aura Voice AI - Individual Profile & Voice Chat Component
 // =========================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -26,120 +26,139 @@ const VoiceChat = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [messages, setMessages] = useState([]);
   const [questionInput, setQuestionInput] = useState('');
+  const [avatarError, setAvatarError] = useState(false);
 
   // Fetch profile data on component mount
   useEffect(() => {
     if (slug) {
       fetchProfile();
     }
-  }, [slug]);
+  }, [slug, fetchProfile]);
 
   // Fetch user profile from Supabase
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     try {
       setLoading(true);
-      
+
       if (!supabase) {
         throw new Error('Supabase client not available');
       }
 
-      // Generate potential user names from slug
-      const nameFromSlug = slug
-        .split('-')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
+      const searchTerm = slug.replace(/-/g, ' ');
 
-      // Query users by name (since we generate slug from name)
-      const { data: users, error: usersError } = await supabase
+      const sanitizedSearch = searchTerm.replace(/'/g, "''");
+
+      const { data: primaryMatches, error: primaryError } = await supabase
         .from('tenant_users')
-        .select(`
-          user_id,
-          name,
-          email,
-          role,
-          created_at,
-          tenant_id,
-          user_preferences (
-            communication_style,
-            response_pace,
-            expertise_areas,
-            preferred_examples
-          ),
-          user_personas (
-            formality,
-            detail_level,
-            example_style,
-            questioning,
-            energy,
-            confidence,
-            sessions_count,
-            last_updated
-          )
-        `)
-        .ilike('name', `%${nameFromSlug}%`)
-        .eq('is_active', true)
-        .limit(1);
+        .select('user_id, tenant_id, email, name, role, persona_settings, voice_preference, created_at')
+        .or(`name.ilike.%${sanitizedSearch}%,persona_settings->>display_name.ilike.%${sanitizedSearch}%`)
+        .limit(12);
 
-      if (usersError) {
-        throw usersError;
+      if (primaryError) {
+        throw primaryError;
       }
 
-      if (!users || users.length === 0) {
+      let candidates = primaryMatches || [];
+
+      if (!candidates.length) {
+        const { data: fallbackMatches, error: fallbackError } = await supabase
+          .from('tenant_users')
+          .select('user_id, tenant_id, email, name, role, persona_settings, voice_preference, created_at')
+          .limit(50);
+
+        if (fallbackError) {
+          throw fallbackError;
+        }
+
+        candidates = fallbackMatches || [];
+      }
+
+      const slugifyUser = (userRow) => {
+        const personaSettings = userRow.persona_settings || {};
+        const displayName = (personaSettings.display_name || personaSettings.name || userRow.name || userRow.email?.split('@')[0] || 'Aura Assistant')
+          .toString()
+          .trim();
+
+        return displayName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '') || 'aura-assistant';
+      };
+
+      const matchedUser = candidates.find(candidate => slugifyUser(candidate) === slug);
+
+      if (!matchedUser) {
         throw new Error('Profile not found');
       }
 
-      const user = users[0];
+      const [personaResult, preferenceResult, conversationsResult] = await Promise.all([
+        supabase
+          .from('user_personas')
+          .select('user_id, formality, detail_level, example_style, questioning, energy, confidence, sessions_count, last_updated')
+          .eq('user_id', matchedUser.user_id)
+          .maybeSingle(),
+        supabase
+          .from('user_preferences')
+          .select('user_id, communication_style, response_pace, expertise_areas, preferred_examples')
+          .eq('user_id', matchedUser.user_id)
+          .maybeSingle(),
+        supabase
+          .from('conversation_summaries')
+          .select('session_id, message_count, key_topics, timestamp')
+          .eq('user_id', matchedUser.user_id)
+          .order('timestamp', { ascending: false })
+      ]);
 
-      // Get conversation stats
-      const { data: conversations, error: conversationsError } = await supabase
-        .from('conversation_summaries')
-        .select('session_id, message_count, key_topics')
-        .eq('user_id', user.user_id);
+      if (personaResult.error) throw personaResult.error;
+      if (preferenceResult.error) throw preferenceResult.error;
+      if (conversationsResult.error) throw conversationsResult.error;
 
-      if (conversationsError) {
-        console.warn('Failed to fetch conversation stats:', conversationsError);
-      }
+      const persona = personaResult.data || null;
+      const preferences = preferenceResult.data || null;
+      const conversations = conversationsResult.data || [];
+      const personaSettings = matchedUser.persona_settings || {};
 
-      // Process profile data
+      const displayName = (personaSettings.display_name || personaSettings.name || matchedUser.name || matchedUser.email?.split('@')[0] || 'Aura Assistant')
+        .toString()
+        .trim();
+
+      const avatarInitials = displayName
+        .split(' ')
+        .filter(Boolean)
+        .map(word => word.charAt(0))
+        .join('')
+        .toUpperCase()
+        .substring(0, 2) || 'AA';
+
+      const expertiseAreas = Array.isArray(preferences?.expertise_areas)
+        ? preferences.expertise_areas.filter(Boolean)
+        : [];
+
       const processedProfile = {
-        id: user.user_id,
-        name: user.name,
-        slug: user.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
-        email: user.email,
-        tenantId: user.tenant_id,
-        
-        // Avatar from initials
-        avatar: user.name
-          .split(' ')
-          .map(word => word.charAt(0))
-          .join('')
-          .toUpperCase()
-          .substring(0, 2),
-
-        // Profile information
-        title: generateTitle(user.name, user.user_preferences?.expertise_areas),
-        bio: generateBio(user.user_preferences, user.user_personas),
-        
-        // Preferences and persona
-        preferences: user.user_preferences,
-        persona: user.user_personas,
-        
-        // Stats
-        totalConversations: conversations?.length || 0,
-        totalMessages: conversations?.reduce((sum, conv) => sum + (conv.message_count || 0), 0) || 0,
-        expertiseAreas: user.user_preferences?.expertise_areas || [],
-        
-        // Verification status
-        isVerified: user.role === 'owner' || (conversations?.length || 0) > 50,
-        
-        // Activity
-        lastActive: user.user_personas?.last_updated || user.created_at,
-        joinedDate: user.created_at,
-        
-        // Generated suggested questions
-        suggestedQuestions: generateSuggestedQuestions(user.user_preferences?.expertise_areas)
+        id: matchedUser.user_id,
+        name: displayName,
+        slug,
+        email: matchedUser.email,
+        tenantId: matchedUser.tenant_id,
+        avatar: avatarInitials,
+        avatarUrl: personaSettings.avatar_url || personaSettings.avatarUrl || personaSettings.profile_picture || personaSettings.photo_url || null,
+        title: generateTitle(displayName, expertiseAreas),
+        bio: personaSettings.bio?.toString().trim() || personaSettings.description?.toString().trim() || generateBio(preferences, persona),
+        preferences,
+        persona,
+        totalConversations: conversations.length,
+        totalMessages: conversations.reduce((sum, conv) => sum + (conv.message_count || 0), 0),
+        expertiseAreas,
+        isVerified: ['owner', 'admin'].includes((matchedUser.role || '').toLowerCase()) || conversations.length > 50,
+        lastActive: persona?.last_updated || matchedUser.created_at,
+        joinedDate: matchedUser.created_at,
+        suggestedQuestions: generateSuggestedQuestions(expertiseAreas),
+        keyTopics: conversations
+          .flatMap(conv => Array.isArray(conv.key_topics) ? conv.key_topics : [])
+          .slice(0, 6)
       };
 
+      setAvatarError(false);
       setProfile(processedProfile);
       setError(null);
     } catch (err) {
@@ -148,7 +167,7 @@ const VoiceChat = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [slug, supabase]);
 
   // Generate title from name and expertise
   const generateTitle = (name, expertiseAreas) => {
@@ -366,7 +385,15 @@ const VoiceChat = () => {
           <div className="profile-info">
             <div className="profile-avatar">
               <div className="avatar-circle">
-                {profile.avatar}
+                {!avatarError && profile.avatarUrl ? (
+                  <img
+                    src={profile.avatarUrl}
+                    alt={profile.name}
+                    onError={() => setAvatarError(true)}
+                  />
+                ) : (
+                  profile.avatar
+                )}
               </div>
               {profile.isVerified && (
                 <div className="verification-badge">

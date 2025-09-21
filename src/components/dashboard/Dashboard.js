@@ -1,7 +1,7 @@
 // Aura Voice AI - Main Dashboard Component (Refactored)
 // =========================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
@@ -21,6 +21,7 @@ import SettingsTab from './SettingsTab';
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user, supabase, signOut } = useAuth();
+  const userId = user?.id || user?.user_id || null;
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -35,41 +36,49 @@ const Dashboard = () => {
     recentActivity: []
   });
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
-      if (!supabase || !user) return;
+      if (!supabase || !userId) {
+        setLoading(false);
+        return;
+      }
 
       // Fetch conversation stats
-      const { data: conversations } = await supabase
+      const { data: conversations, error: conversationsError } = await supabase
         .from('conversation_summaries')
         .select('session_id')
-        .eq('user_id', user.user_id);
+        .eq('user_id', userId);
+
+      if (conversationsError) throw conversationsError;
 
       // Fetch documents
-      const { data: documents } = await supabase
+      const { data: documents, error: documentsError } = await supabase
         .from('documents')
         .select('doc_id')
-        .eq('user_id', user.user_id);
+        .eq('user_id', userId);
+
+      if (documentsError) throw documentsError;
 
       // Fetch recent activity from conversation summaries
-      const { data: activity } = await supabase
+      const { data: activity, error: activityError } = await supabase
         .from('conversation_summaries')
-        .select('session_id, created_at, summary')
-        .eq('user_id', user.user_id)
-        .order('created_at', { ascending: false })
+        .select('session_id, summary, key_topics, timestamp')
+        .eq('user_id', userId)
+        .order('timestamp', { ascending: false })
         .limit(5);
+
+      if (activityError) throw activityError;
 
       setDashboardData({
         totalConversations: conversations?.length || 0,
         totalDocuments: documents?.length || 0,
         totalQAPairs: 0, // Will be updated by TrainingDashboard
         totalLogicNotes: 0, // Will be updated by TrainingDashboard
-        recentActivity: activity || []
+        recentActivity: (activity || []).map(item => ({
+          ...item,
+          timestamp: item.timestamp || null
+        }))
       });
     } catch (err) {
       setError('Failed to load dashboard data');
@@ -77,12 +86,16 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [supabase, userId]);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   // Update dashboard data from child components
-  const updateDashboardData = (updates) => {
+  const updateDashboardData = useCallback((updates) => {
     setDashboardData(prev => ({ ...prev, ...updates }));
-  };
+  }, []);
 
   const tabs = [
     { id: 'overview', label: 'Overview', component: DashboardOverview },

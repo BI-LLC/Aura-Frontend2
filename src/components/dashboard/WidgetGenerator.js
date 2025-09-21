@@ -24,6 +24,7 @@ const WidgetGenerator = ({ user }) => {
     const attributes = [
       `src="${widgetHost}"`,
       'async',
+      'data-widget="aura"',
       `data-user="${user?.id || ''}"`
     ];
 
@@ -92,6 +93,7 @@ const WidgetGenerator = ({ user }) => {
           <li>The widget automatically connects using your authenticated Supabase session.</li>
           <li>Host the <code>widget.js</code> file at the same origin as your dashboard or set <code>REACT_APP_WIDGET_URL</code>.</li>
           <li>Add optional data attributes like <code>data-theme</code> or <code>data-language</code> to extend the embed.</li>
+          <li>The floating launcher lets visitors switch between real-time chat and call requests.</li>
         </ul>
       </div>
 

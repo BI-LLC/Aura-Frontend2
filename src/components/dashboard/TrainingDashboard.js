@@ -1,8 +1,21 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import LoadingSpinner from '../common/LoadingSpinner';
 import Alert from '../common/Alert';
 
 const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) => {
+  const LOGIC_NOTE_CATEGORIES = useMemo(
+    () => [
+      { value: 'general', label: 'General Guidance' },
+      { value: 'personality', label: 'Personality & Tone' },
+      { value: 'knowledge', label: 'Knowledge Base' },
+      { value: 'behavior', label: 'Behavior Rules' },
+      { value: 'compliance', label: 'Compliance & Safety' },
+      { value: 'escalation', label: 'Escalation' }
+    ],
+    []
+  );
+
+  const defaultLogicCategory = LOGIC_NOTE_CATEGORIES[0].value;
   const [activeTab, setActiveTab] = useState('qa');
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
@@ -10,6 +23,26 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
   const [trainingData, setTrainingData] = useState([]);
   const [referenceMaterials, setReferenceMaterials] = useState([]);
   const [logicNotes, setLogicNotes] = useState([]);
+
+  const logicCategories = useMemo(() => {
+    const baseCategories = [...LOGIC_NOTE_CATEGORIES];
+    const seen = new Set(baseCategories.map(category => category.value));
+
+    logicNotes
+      .map(note => note.category)
+      .filter(Boolean)
+      .forEach(category => {
+        if (!seen.has(category)) {
+          seen.add(category);
+          baseCategories.push({
+            value: category,
+            label: category.charAt(0).toUpperCase() + category.slice(1)
+          });
+        }
+      });
+
+    return baseCategories;
+  }, [LOGIC_NOTE_CATEGORIES, logicNotes]);
 
   const [isQADialogOpen, setIsQADialogOpen] = useState(false);
   const [isLogicDialogOpen, setIsLogicDialogOpen] = useState(false);
@@ -21,7 +54,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
   const [qaTagInput, setQATagInput] = useState('');
   const [qaSaving, setQASaving] = useState(false);
 
-  const [logicFormData, setLogicFormData] = useState({ title: '', content: '', category: 'general', tags: [] });
+  const [logicFormData, setLogicFormData] = useState({ title: '', content: '', category: defaultLogicCategory, tags: [] });
   const [logicTagInput, setLogicTagInput] = useState('');
   const [logicSaving, setLogicSaving] = useState(false);
 
@@ -29,6 +62,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const alertTimeoutRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const userId = user?.user_id || user?.id || null;
 
@@ -42,56 +76,66 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
 
   const fetchAllData = useCallback(
     async (withLoader = false) => {
-      if (!supabase) return;
-
       if (withLoader) {
         setLoading(true);
       }
 
+      if (!supabase) {
+        setLoading(false);
+        return;
+      }
+
       try {
-        const baseTrainingQuery = supabase
+        const trainingResult = await supabase
           .from('training_data')
           .select('*')
           .order('created_at', { ascending: false });
 
-        const baseMaterialsQuery = supabase
-          .from('reference_materials')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        const baseLogicQuery = supabase
-          .from('logic_notes')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        let trainingResult;
         let materialsResult;
         let notesResult;
 
         if (userId) {
-          trainingResult = await baseTrainingQuery.eq('created_by', userId);
-          materialsResult = await baseMaterialsQuery.eq('uploaded_by', userId);
-          notesResult = await baseLogicQuery.eq('created_by', userId);
+          materialsResult = await supabase
+            .from('reference_materials')
+            .select('*')
+            .eq('uploaded_by', userId)
+            .order('created_at', { ascending: false });
 
-          if (trainingResult.error) {
-            console.warn('Falling back to all training records:', trainingResult.error?.message || trainingResult.error);
-            trainingResult = await baseTrainingQuery;
+          if (materialsResult.error || (materialsResult.data ?? []).length === 0) {
+            if (materialsResult.error) {
+              console.warn('Falling back to all reference materials:', materialsResult.error?.message || materialsResult.error);
+            }
+            materialsResult = await supabase
+              .from('reference_materials')
+              .select('*')
+              .order('created_at', { ascending: false });
           }
 
-          if (materialsResult.error) {
-            console.warn('Falling back to all reference materials:', materialsResult.error?.message || materialsResult.error);
-            materialsResult = await baseMaterialsQuery;
-          }
+          notesResult = await supabase
+            .from('logic_notes')
+            .select('*')
+            .eq('created_by', userId)
+            .order('created_at', { ascending: false });
 
-          if (notesResult.error) {
-            console.warn('Falling back to all logic notes:', notesResult.error?.message || notesResult.error);
-            notesResult = await baseLogicQuery;
+          if (notesResult.error || (notesResult.data ?? []).length === 0) {
+            if (notesResult.error) {
+              console.warn('Falling back to all logic notes:', notesResult.error?.message || notesResult.error);
+            }
+            notesResult = await supabase
+              .from('logic_notes')
+              .select('*')
+              .order('created_at', { ascending: false });
           }
         } else {
-          [trainingResult, materialsResult, notesResult] = await Promise.all([
-            baseTrainingQuery,
-            baseMaterialsQuery,
-            baseLogicQuery
+          [materialsResult, notesResult] = await Promise.all([
+            supabase
+              .from('reference_materials')
+              .select('*')
+              .order('created_at', { ascending: false }),
+            supabase
+              .from('logic_notes')
+              .select('*')
+              .order('created_at', { ascending: false })
           ]);
         }
 
@@ -99,15 +143,15 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         if (materialsResult.error) throw materialsResult.error;
         if (notesResult.error) throw notesResult.error;
 
-        const trainingItems = (trainingResult.data || []).map(item => ({
+        const trainingItems = (trainingResult?.data || []).map(item => ({
           ...item,
           tags: Array.isArray(item.tags) ? item.tags : []
         }));
-        const materialItems = (materialsResult.data || []).map(item => ({
+        const materialItems = (materialsResult?.data || []).map(item => ({
           ...item,
           tags: Array.isArray(item.tags) ? item.tags : []
         }));
-        const logicItems = (notesResult.data || []).map(item => ({
+        const logicItems = (notesResult?.data || []).map(item => ({
           ...item,
           tags: Array.isArray(item.tags) ? item.tags : [],
           category: item.category || 'general'
@@ -134,9 +178,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         console.error('Failed to load training data:', error);
         showAlert('Failed to load training data from Supabase.', 'error');
       } finally {
-        if (withLoader) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     },
     [supabase, updateDashboardData, showAlert, userId]
@@ -176,12 +218,12 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       setLogicFormData({
         title: item.title || '',
         content: item.content || '',
-        category: item.category || 'general',
+        category: item.category || defaultLogicCategory,
         tags: Array.isArray(item.tags) ? item.tags : []
       });
     } else {
       setEditingLogicItem(null);
-      setLogicFormData({ title: '', content: '', category: 'general', tags: [] });
+      setLogicFormData({ title: '', content: '', category: defaultLogicCategory, tags: [] });
     }
     setLogicTagInput('');
     setIsLogicDialogOpen(true);
@@ -197,7 +239,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
   const closeLogicDialog = () => {
     setIsLogicDialogOpen(false);
     setEditingLogicItem(null);
-    setLogicFormData({ title: '', content: '', category: 'general', tags: [] });
+    setLogicFormData({ title: '', content: '', category: defaultLogicCategory, tags: [] });
     setLogicTagInput('');
   };
 
@@ -260,7 +302,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       } else {
         const { error } = await supabase
           .from('training_data')
-          .insert([{ ...payload, created_by: userId }]);
+          .insert([payload]);
 
         if (error) throw error;
         showAlert('Q&A pair added successfully.', 'success');
@@ -321,7 +363,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       const payload = {
         title: logicFormData.title.trim(),
         content: logicFormData.content.trim(),
-        category: logicFormData.category.trim() || 'general',
+        category: (logicFormData.category || defaultLogicCategory).toString(),
         tags: logicFormData.tags
       };
 
@@ -444,6 +486,11 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       setUploadProgress(0);
       event.target.value = '';
     }
+  };
+
+  const handleOpenFileDialog = () => {
+    if (isUploading) return;
+    fileInputRef.current?.click();
   };
 
   const handleDeleteMaterial = async (material) => {
@@ -582,7 +629,6 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         </div>
       ) : trainingData.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon" aria-hidden="true">Q&amp;A</div>
           <h4>No Q&amp;A pairs yet</h4>
           <p>Click "Add Q&amp;A Pair" to create your first prompt-response pair.</p>
         </div>
@@ -640,11 +686,24 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
           <h3>Reference Materials</h3>
           <p>Upload documents for Aura to use as background knowledge (PDF, DOCX, TXT, MD).</p>
         </div>
-        <label className={`btn primary ${isUploading ? 'disabled' : ''}`}>
-          <input type="file" accept=".pdf,.docx,.txt,.md" onChange={handleFileUpload} disabled={isUploading} />
-          <span className="icon" aria-hidden="true">File</span>
-          {isUploading ? `Uploading… ${uploadProgress}%` : 'Upload File'}
-        </label>
+        <div className="upload-actions">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx,.txt,.md"
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
+          />
+          <button
+            type="button"
+            className={`btn primary ${isUploading ? 'disabled' : ''}`}
+            onClick={handleOpenFileDialog}
+            disabled={isUploading}
+          >
+            <span className="icon" aria-hidden="true">File</span>
+            {isUploading ? `Uploading… ${uploadProgress}%` : 'Upload File'}
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -653,7 +712,6 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         </div>
       ) : referenceMaterials.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon" aria-hidden="true">Docs</div>
           <h4>No reference materials yet</h4>
           <p>Upload documents to build Aura's knowledge base.</p>
         </div>
@@ -711,7 +769,6 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
         </div>
       ) : logicNotes.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon" aria-hidden="true">Logic</div>
           <h4>No logic notes yet</h4>
           <p>Define guidance and behavioral rules for Aura.</p>
         </div>
@@ -780,12 +837,9 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       <div className="summary-grid">
         {summaryCards.map(card => (
           <div key={card.label} className="summary-card">
-            <div className="summary-icon" aria-hidden="true">{card.label.charAt(0)}</div>
-            <div>
-              <div className="summary-value">{card.value}</div>
-              <div className="summary-label">{card.label}</div>
-              <div className="summary-helper">{card.helper}</div>
-            </div>
+            <div className="summary-value">{card.value}</div>
+            <div className="summary-label">{card.label}</div>
+            <div className="summary-helper">{card.helper}</div>
           </div>
         ))}
       </div>
@@ -907,12 +961,16 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
               </label>
               <label>
                 <span>Category</span>
-                <input
-                  type="text"
+                <select
                   value={logicFormData.category}
                   onChange={event => setLogicFormData(prev => ({ ...prev, category: event.target.value }))}
-                  placeholder="e.g., personality, knowledge, behavior"
-                />
+                >
+                  {logicCategories.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 <span>Content</span>
@@ -1011,17 +1069,14 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
 
         .summary-card {
           display: flex;
-          align-items: center;
-          gap: var(--space-3);
+          flex-direction: column;
+          align-items: flex-start;
+          gap: var(--space-1);
           padding: var(--space-4);
           border-radius: var(--radius-xl);
           border: 1px solid var(--gray-200);
           background: var(--white);
           box-shadow: var(--shadow-xs);
-        }
-
-        .summary-icon {
-          font-size: 1.75rem;
         }
 
         .summary-value {
@@ -1129,6 +1184,11 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
           max-width: 520px;
         }
 
+        .upload-actions {
+          display: inline-flex;
+          align-items: center;
+        }
+
         .btn {
           display: inline-flex;
           align-items: center;
@@ -1139,6 +1199,8 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
           font-weight: var(--font-weight-medium);
           border: none;
           transition: background var(--transition-fast), color var(--transition-fast);
+          position: relative;
+          overflow: hidden;
         }
 
         .btn.primary {
@@ -1169,6 +1231,19 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
           inset: 0;
           opacity: 0;
           cursor: pointer;
+          width: 100%;
+          height: 100%;
+        }
+
+        .btn.disabled input[type='file'] {
+          pointer-events: none;
+        }
+
+        select {
+          border: 1px solid var(--gray-300);
+          border-radius: var(--radius-md);
+          padding: var(--space-3);
+          font-size: var(--text-base);
         }
 
         .table-container {
@@ -1256,11 +1331,6 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
           flex-direction: column;
           align-items: center;
           gap: var(--space-2);
-        }
-
-        .empty-icon {
-          font-size: 3rem;
-          margin-bottom: var(--space-2);
         }
 
         .panel-loading {

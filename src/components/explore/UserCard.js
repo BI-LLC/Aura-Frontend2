@@ -1,7 +1,7 @@
 // UserCard.js - User Profile Card Component
 // Displays user information and AI personality in the explore section
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const UserCard = ({ user, onChatClick, showActions = true, compact = false }) => {
@@ -16,12 +16,13 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
     name: user?.name || 'Anonymous User',
     tagline: user?.tagline || 'AI Assistant',
     description: user?.description || 'A helpful AI assistant ready to chat with you.',
-    avatar: user?.avatar || null,
+    avatarUrl: user?.avatarUrl || user?.avatar_url || null,
+    avatar: user?.avatar || user?.avatarInitials || (user?.name ? user.name.charAt(0) : 'A'),
     isOnline: user?.isOnline ?? true,
     responseTime: user?.responseTime || 'Usually responds in seconds',
     totalChats: user?.totalChats || 0,
     rating: user?.rating || 4.5,
-    categories: user?.categories || [],
+    categories: user?.categories || user?.tags || [],
     personality: user?.personality || 'friendly',
     voiceEnabled: user?.voiceEnabled ?? true,
     lastActive: user?.lastActive ? new Date(user?.lastActive) : new Date(),
@@ -55,6 +56,10 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
     if (!personality) return 'Personality';
     return personality.charAt(0).toUpperCase() + personality.slice(1);
   };
+
+  useEffect(() => {
+    setImageError(false);
+  }, [userData.avatarUrl, userData.id]);
 
   /**
    * Get status indicator color
@@ -108,15 +113,15 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
     return (
       <div className="user-card compact" onClick={handleViewProfile}>
         <div className="card-avatar">
-          {!imageError && userData.avatar ? (
-            <img 
-              src={userData.avatar} 
+          {!imageError && userData.avatarUrl ? (
+            <img
+              src={userData.avatarUrl}
               alt={userData.name}
               onError={() => setImageError(true)}
             />
           ) : (
             <div className="avatar-placeholder">
-              {userData.name.charAt(0).toUpperCase()}
+              {userData.avatar?.toString().substring(0, 2).toUpperCase()}
             </div>
           )}
           <div 
@@ -154,16 +159,16 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
       {/* Card Header */}
       <div className="card-header">
         <div className="avatar-section">
-          {!imageError && userData.avatar ? (
-            <img 
-              src={userData.avatar} 
+          {!imageError && userData.avatarUrl ? (
+            <img
+              src={userData.avatarUrl}
               alt={userData.name}
               className="user-avatar"
               onError={() => setImageError(true)}
             />
           ) : (
             <div className="avatar-placeholder">
-              {userData.name.charAt(0).toUpperCase()}
+              {userData.avatar?.toString().substring(0, 2).toUpperCase()}
             </div>
           )}
           
