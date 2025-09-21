@@ -1,10 +1,11 @@
 // Aura Voice AI - Individual Profile & Voice Chat Component
 // =========================================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
+import { buildProfileSlug, isPermissionError, sanitizeSlug } from '../../utils/slugUtils';
 
 /**
  * VoiceChat Component
@@ -13,10 +14,12 @@ import LoadingSpinner from '../common/LoadingSpinner';
  * Similar to Delphi's individual profile pages
  * Connects to Supabase to fetch user data by slug
  */
+const PROFILE_BUCKET = process.env.REACT_APP_SUPABASE_AVATAR_BUCKET || 'avatars';
+
 const VoiceChat = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { supabase } = useAuth();
+  const { supabase, isAuthenticated } = useAuth();
 
   // State management
   const [profile, setProfile] = useState(null);
@@ -27,13 +30,45 @@ const VoiceChat = () => {
   const [messages, setMessages] = useState([]);
   const [questionInput, setQuestionInput] = useState('');
   const [avatarError, setAvatarError] = useState(false);
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  const [callStatus, setCallStatus] = useState('idle');
+  const [isMuted, setIsMuted] = useState(false);
+  const callTimerRef = useRef(null);
 
-  // Fetch profile data on component mount
   useEffect(() => {
-    if (slug) {
-      fetchProfile();
+    if (isAuthenticated) {
+      setShowLoginPrompt(false);
     }
-  }, [slug, fetchProfile]);
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    return () => {
+      if (callTimerRef.current) {
+        clearTimeout(callTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isRecording) {
+      setCallStatus('idle');
+      setIsMuted(false);
+
+      if (callTimerRef.current) {
+        clearTimeout(callTimerRef.current);
+        callTimerRef.current = null;
+      }
+    }
+  }, [isRecording]);
+
+  const getPublicAvatarUrl = useCallback((path) => {
+    if (!path || !supabase) {
+      return null;
+    }
+
+    const { data } = supabase.storage.from(PROFILE_BUCKET).getPublicUrl(path);
+    return data?.publicUrl || null;
+  }, [supabase]);
 
   // Fetch user profile from Supabase
   const fetchProfile = useCallback(async () => {
@@ -44,51 +79,146 @@ const VoiceChat = () => {
         throw new Error('Supabase client not available');
       }
 
-      const searchTerm = slug.replace(/-/g, ' ');
+      const rawSlug = slug || '';
+      const slugSegments = rawSlug.split('/').filter(Boolean);
+      const slugCandidates = Array.from(new Set([
+        sanitizeSlug(rawSlug),
+        ...slugSegments.map(segment => sanitizeSlug(segment))
+      ])).filter(Boolean);
 
-      const sanitizedSearch = searchTerm.replace(/'/g, "''");
+      let permissionDenied = false;
+      let profileRecord = null;
 
-      const { data: primaryMatches, error: primaryError } = await supabase
-        .from('tenant_users')
-        .select('user_id, tenant_id, email, name, role, persona_settings, voice_preference, created_at')
-        .or(`name.ilike.%${sanitizedSearch}%,persona_settings->>display_name.ilike.%${sanitizedSearch}%`)
-        .limit(12);
+      if (slugCandidates.length > 0) {
+        const { data: profileMatches, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, username, email, full_name, bio, title, avatar_path, created_at')
+          .in('username', slugCandidates)
+          .limit(1);
 
-      if (primaryError) {
-        throw primaryError;
+        if (profileError) {
+          if (isPermissionError(profileError)) {
+            permissionDenied = true;
+          } else {
+            throw profileError;
+          }
+        } else if (profileMatches && profileMatches.length > 0) {
+          profileRecord = profileMatches[0];
+        }
       }
 
-      let candidates = primaryMatches || [];
+      let matchedUser = null;
 
-      if (!candidates.length) {
-        const { data: fallbackMatches, error: fallbackError } = await supabase
+      if (profileRecord) {
+        const { data: tenantMatch, error: tenantError } = await supabase
           .from('tenant_users')
           .select('user_id, tenant_id, email, name, role, persona_settings, voice_preference, created_at')
-          .limit(50);
+          .eq('user_id', profileRecord.id)
+          .maybeSingle();
 
-        if (fallbackError) {
-          throw fallbackError;
+        if (tenantError) {
+          if (isPermissionError(tenantError)) {
+            permissionDenied = true;
+            matchedUser = {
+              user_id: profileRecord.id,
+              tenant_id: null,
+              email: profileRecord.email,
+              name: profileRecord.full_name,
+              role: null,
+              persona_settings: {},
+              voice_preference: null,
+              created_at: profileRecord.created_at
+            };
+          } else {
+            throw tenantError;
+          }
+        } else {
+          matchedUser = tenantMatch;
         }
-
-        candidates = fallbackMatches || [];
       }
 
-      const slugifyUser = (userRow) => {
-        const personaSettings = userRow.persona_settings || {};
-        const displayName = (personaSettings.display_name || personaSettings.name || userRow.name || userRow.email?.split('@')[0] || 'Aura Assistant')
-          .toString()
-          .trim();
-
-        return displayName
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-+|-+$/g, '') || 'aura-assistant';
-      };
-
-      const matchedUser = candidates.find(candidate => slugifyUser(candidate) === slug);
+      let profilesMap = new Map(profileRecord ? [[profileRecord.id, profileRecord]] : []);
 
       if (!matchedUser) {
-        throw new Error('Profile not found');
+        const { data: tenantCandidates, error: tenantError } = await supabase
+          .from('tenant_users')
+          .select('user_id, tenant_id, email, name, role, persona_settings, voice_preference, created_at')
+          .limit(200);
+
+        if (tenantError) {
+          if (isPermissionError(tenantError)) {
+            permissionDenied = true;
+          } else {
+            throw tenantError;
+          }
+        }
+
+        const candidates = tenantCandidates || [];
+
+        if (candidates.length > 0) {
+          const candidateIds = candidates.map(item => item.user_id).filter(Boolean);
+
+          if (candidateIds.length > 0) {
+            const { data: candidateProfiles, error: candidateProfileError } = await supabase
+              .from('profiles')
+              .select('id, username, email, full_name, bio, title, avatar_path, created_at')
+              .in('id', candidateIds);
+
+            if (candidateProfileError) {
+              if (isPermissionError(candidateProfileError)) {
+                permissionDenied = true;
+              } else {
+                throw candidateProfileError;
+              }
+            } else {
+              profilesMap = new Map(candidateProfiles.map(item => [item.id, item]));
+            }
+          }
+
+          const candidateMatch = candidates.find((candidate) => {
+            const personaSettings = candidate.persona_settings || {};
+            const candidateProfile = profilesMap.get(candidate.user_id) || null;
+            const fallbackName = (
+              personaSettings.display_name ||
+              personaSettings.name ||
+              candidateProfile?.full_name ||
+              candidate.name ||
+              candidate.email?.split('@')[0] ||
+              'Aura Assistant'
+            ).toString().trim();
+
+            const candidateSlug = buildProfileSlug({
+              personaSettings,
+              profile: candidateProfile,
+              fallbackName,
+              fallbackId: candidate.user_id
+            });
+
+            return slugCandidates.includes(candidateSlug);
+          }) || null;
+
+          if (candidateMatch) {
+            matchedUser = candidateMatch;
+            profileRecord = profilesMap.get(candidateMatch.user_id) || profileRecord;
+          }
+        }
+      }
+
+      if (!matchedUser) {
+        if (profileRecord && permissionDenied) {
+          matchedUser = {
+            user_id: profileRecord.id,
+            tenant_id: null,
+            email: profileRecord.email,
+            name: profileRecord.full_name,
+            role: null,
+            persona_settings: {},
+            voice_preference: null,
+            created_at: profileRecord.created_at
+          };
+        } else {
+          throw new Error('Profile not found');
+        }
       }
 
       const [personaResult, preferenceResult, conversationsResult] = await Promise.all([
@@ -109,18 +239,57 @@ const VoiceChat = () => {
           .order('timestamp', { ascending: false })
       ]);
 
-      if (personaResult.error) throw personaResult.error;
-      if (preferenceResult.error) throw preferenceResult.error;
-      if (conversationsResult.error) throw conversationsResult.error;
+      let persona = null;
+      if (personaResult.error) {
+        if (isPermissionError(personaResult.error)) {
+          permissionDenied = true;
+        } else {
+          throw personaResult.error;
+        }
+      } else {
+        persona = personaResult.data || null;
+      }
 
-      const persona = personaResult.data || null;
-      const preferences = preferenceResult.data || null;
-      const conversations = conversationsResult.data || [];
+      let preferences = null;
+      if (preferenceResult.error) {
+        if (isPermissionError(preferenceResult.error)) {
+          permissionDenied = true;
+        } else {
+          throw preferenceResult.error;
+        }
+      } else {
+        preferences = preferenceResult.data || null;
+      }
+
+      let conversations = [];
+      if (conversationsResult.error) {
+        if (isPermissionError(conversationsResult.error)) {
+          permissionDenied = true;
+        } else {
+          throw conversationsResult.error;
+        }
+      } else {
+        conversations = conversationsResult.data || [];
+      }
+
       const personaSettings = matchedUser.persona_settings || {};
+      const profileDetails = profileRecord || null;
 
-      const displayName = (personaSettings.display_name || personaSettings.name || matchedUser.name || matchedUser.email?.split('@')[0] || 'Aura Assistant')
-        .toString()
-        .trim();
+      const displayName = (
+        personaSettings.display_name ||
+        personaSettings.name ||
+        profileDetails?.full_name ||
+        matchedUser.name ||
+        matchedUser.email?.split('@')[0] ||
+        'Aura Assistant'
+      ).toString().trim();
+
+      const resolvedSlug = buildProfileSlug({
+        personaSettings,
+        profile: profileDetails,
+        fallbackName: displayName,
+        fallbackId: matchedUser.user_id
+      });
 
       const avatarInitials = displayName
         .split(' ')
@@ -130,28 +299,43 @@ const VoiceChat = () => {
         .toUpperCase()
         .substring(0, 2) || 'AA';
 
+      const avatarUrl =
+        personaSettings.avatar_url ||
+        personaSettings.avatarUrl ||
+        personaSettings.profile_picture ||
+        personaSettings.photo_url ||
+        profileDetails?.avatar_url ||
+        (profileDetails?.avatar_path ? getPublicAvatarUrl(profileDetails.avatar_path) : null);
+
       const expertiseAreas = Array.isArray(preferences?.expertise_areas)
         ? preferences.expertise_areas.filter(Boolean)
         : [];
 
+      const conversationsCount = conversations.length;
+      const totalMessages = conversations.reduce((sum, conv) => sum + (conv.message_count || 0), 0);
+
       const processedProfile = {
         id: matchedUser.user_id,
         name: displayName,
-        slug,
-        email: matchedUser.email,
+        slug: resolvedSlug,
+        email: matchedUser.email || profileDetails?.email || null,
         tenantId: matchedUser.tenant_id,
         avatar: avatarInitials,
-        avatarUrl: personaSettings.avatar_url || personaSettings.avatarUrl || personaSettings.profile_picture || personaSettings.photo_url || null,
-        title: generateTitle(displayName, expertiseAreas),
-        bio: personaSettings.bio?.toString().trim() || personaSettings.description?.toString().trim() || generateBio(preferences, persona),
+        avatarUrl,
+        title: profileDetails?.title || personaSettings.title || generateTitle(displayName, expertiseAreas),
+        bio:
+          personaSettings.bio?.toString().trim() ||
+          personaSettings.description?.toString().trim() ||
+          profileDetails?.bio?.toString().trim() ||
+          generateBio(preferences, persona),
         preferences,
         persona,
-        totalConversations: conversations.length,
-        totalMessages: conversations.reduce((sum, conv) => sum + (conv.message_count || 0), 0),
+        totalConversations: conversationsCount,
+        totalMessages,
         expertiseAreas,
-        isVerified: ['owner', 'admin'].includes((matchedUser.role || '').toLowerCase()) || conversations.length > 50,
-        lastActive: persona?.last_updated || matchedUser.created_at,
-        joinedDate: matchedUser.created_at,
+        isVerified: ['owner', 'admin'].includes((matchedUser.role || '').toLowerCase()) || conversationsCount > 50,
+        lastActive: persona?.last_updated || matchedUser.created_at || profileDetails?.created_at,
+        joinedDate: matchedUser.created_at || profileDetails?.created_at,
         suggestedQuestions: generateSuggestedQuestions(expertiseAreas),
         keyTopics: conversations
           .flatMap(conv => Array.isArray(conv.key_topics) ? conv.key_topics : [])
@@ -162,12 +346,26 @@ const VoiceChat = () => {
       setProfile(processedProfile);
       setError(null);
     } catch (err) {
-      setError(err.message || 'Failed to load profile');
+      if (isPermissionError(err)) {
+        setError('This assistant is private. Please sign in to view full details.');
+      } else {
+        setError(err.message || 'Failed to load profile');
+      }
       console.error('Error fetching profile:', err);
     } finally {
       setLoading(false);
     }
-  }, [slug, supabase]);
+  }, [getPublicAvatarUrl, slug, supabase]);
+
+
+  // Fetch profile data on component mount
+  useEffect(() => {
+    if (slug) {
+      fetchProfile();
+    }
+  }, [slug, fetchProfile]);
+
+
 
   // Generate title from name and expertise
   const generateTitle = (name, expertiseAreas) => {
@@ -321,14 +519,33 @@ const VoiceChat = () => {
 
   // Handle voice recording
   const handleVoiceRecord = () => {
+    if (!isAuthenticated) {
+      setShowLoginPrompt(true);
+      return;
+    }
+
+    setShowLoginPrompt(false);
+
+    if (callTimerRef.current) {
+      clearTimeout(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+
     if (isRecording) {
       setIsRecording(false);
-      // Here you would stop recording and send to your voice processing API
+      setCallStatus('idle');
+      setIsMuted(false);
       console.log('Stopping voice recording...');
     } else {
       setIsRecording(true);
-      // Here you would start voice recording
+      setCallStatus('connecting');
+      setIsMuted(false);
       console.log('Starting voice recording...');
+
+      callTimerRef.current = setTimeout(() => {
+        setCallStatus('in-call');
+        callTimerRef.current = null;
+      }, 600);
     }
   };
 
@@ -441,12 +658,12 @@ const VoiceChat = () => {
 
           {/* Action Buttons */}
           <div className="profile-actions">
-            <button 
+            <button
               onClick={handleVoiceRecord}
               className={`btn btn-primary btn-lg voice-btn ${isRecording ? 'recording' : ''}`}
             >
               {isRecording ? (
-                <>Recording...</>
+                <>End Call</>
               ) : (
                 <>Start Call</>
               )}
@@ -455,6 +672,53 @@ const VoiceChat = () => {
               Open Chat
             </button>
           </div>
+
+          {showLoginPrompt && (
+            <div className="call-login-prompt" role="alert">
+              <p>
+                Please sign in to start a voice call with {profile.name.split(' ')[0]}.
+              </p>
+              <div className="call-login-actions">
+                <Link to="/login" className="btn btn-primary btn-sm">Sign In</Link>
+                <Link to="/register" className="btn btn-secondary btn-sm">Create Account</Link>
+              </div>
+            </div>
+          )}
+
+          {isRecording && (
+            <div className="call-interface" role="status" aria-live="polite">
+              <div className="call-status">
+                <span className={`call-status-indicator ${callStatus}`} aria-hidden="true" />
+                <div>
+                  <p className="call-status-title">
+                    {callStatus === 'connecting' ? 'Connecting call...' : 'Call in progress'}
+                  </p>
+                  <p className="call-status-description">
+                    {callStatus === 'connecting'
+                      ? `Setting up a secure connection with ${profile.name}.`
+                      : `You are connected with ${profile.name}.`}
+                  </p>
+                </div>
+              </div>
+              <div className="call-controls">
+                <button
+                  type="button"
+                  className={`mute-btn ${isMuted ? 'active' : ''}`}
+                  onClick={() => setIsMuted((prev) => !prev)}
+                  aria-pressed={isMuted}
+                >
+                  {isMuted ? 'Unmute' : 'Mute'}
+                </button>
+                <button
+                  type="button"
+                  className="end-call-btn"
+                  onClick={handleVoiceRecord}
+                >
+                  End Call
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Main Content */}
@@ -716,6 +980,120 @@ const VoiceChat = () => {
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.8; }
+        }
+
+        .call-login-prompt {
+          margin-top: var(--space-4);
+          padding: var(--space-4);
+          border-radius: var(--radius-lg);
+          background: var(--error-100);
+          border: 1px solid rgba(239, 68, 68, 0.25);
+          color: var(--gray-700);
+        }
+
+        .call-login-prompt p {
+          margin-bottom: var(--space-3);
+          font-size: var(--text-sm);
+        }
+
+        .call-login-actions {
+          display: flex;
+          gap: var(--space-3);
+        }
+
+        .call-interface {
+          margin-top: var(--space-4);
+          padding: var(--space-4);
+          border-radius: var(--radius-xl);
+          background: var(--white);
+          border: 1px solid var(--gray-200);
+          box-shadow: var(--shadow-sm);
+        }
+
+        .call-status {
+          display: flex;
+          align-items: center;
+          gap: var(--space-4);
+        }
+
+        .call-status-title {
+          font-size: var(--text-lg);
+          font-weight: var(--font-weight-semibold);
+          color: var(--gray-900);
+          margin-bottom: var(--space-1);
+        }
+
+        .call-status-description {
+          font-size: var(--text-sm);
+          color: var(--gray-600);
+        }
+
+        .call-status-indicator {
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: var(--warning-500);
+          box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.15);
+          animation: call-pulse 1.5s infinite ease-in-out;
+        }
+
+        .call-status-indicator.in-call {
+          background: var(--success-500);
+          box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.2);
+        }
+
+        .call-status-indicator.idle {
+          background: var(--gray-400);
+          box-shadow: none;
+          animation: none;
+        }
+
+        @keyframes call-pulse {
+          0%, 100% { opacity: 0.8; }
+          50% { opacity: 1; }
+        }
+
+        .call-controls {
+          margin-top: var(--space-4);
+          display: flex;
+          gap: var(--space-3);
+        }
+
+        .mute-btn,
+        .end-call-btn {
+          flex: 1;
+          padding: var(--space-3) var(--space-4);
+          border-radius: var(--radius-lg);
+          border: none;
+          font-size: var(--text-base);
+          font-weight: var(--font-weight-medium);
+          cursor: pointer;
+          transition: all var(--transition-fast);
+        }
+
+        .mute-btn {
+          background: var(--gray-100);
+          color: var(--gray-700);
+        }
+
+        .mute-btn:hover {
+          background: var(--gray-200);
+        }
+
+        .mute-btn.active {
+          background: var(--gray-300);
+          color: var(--gray-900);
+        }
+
+        .end-call-btn {
+          background: var(--error-500);
+          color: var(--white);
+          box-shadow: var(--shadow-sm);
+        }
+
+        .end-call-btn:hover {
+          background: #dc2626;
+          box-shadow: var(--shadow-md);
         }
 
         /* Main Content */

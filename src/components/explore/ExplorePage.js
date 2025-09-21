@@ -2,9 +2,10 @@
 // ====================================
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
+import { buildProfileSlug, isPermissionError } from '../../utils/slugUtils';
 
 /**
  * ExplorePage Component
@@ -12,6 +13,8 @@ import LoadingSpinner from '../common/LoadingSpinner';
  * Professional browsing experience for voice chatbots
  * Designed for Silicon Valley executives to discover AI personalities
  */
+const PROFILE_BUCKET = process.env.REACT_APP_SUPABASE_AVATAR_BUCKET || 'avatars';
+
 const ExplorePage = () => {
   // ✅ FIXED: Get both isAuthenticated and supabase at top level
   const { isAuthenticated, supabase } = useAuth();
@@ -42,6 +45,87 @@ const ExplorePage = () => {
     { id: 'name', label: 'Name A-Z' }
   ];
 
+  const getPublicAvatarUrl = useCallback((path) => {
+    if (!path || !supabase) {
+      return null;
+    }
+
+    const { data } = supabase.storage.from(PROFILE_BUCKET).getPublicUrl(path);
+    return data?.publicUrl || null;
+  }, [supabase]);
+
+  const fetchProfilesDirectory = useCallback(async () => {
+    if (!supabase) {
+      setChatbots([]);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, username, email, bio, title, avatar_path, created_at')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (error) {
+        throw error;
+      }
+
+      const mappedProfiles = (data || []).map((profile) => {
+        const displayName = (profile.full_name || profile.username || 'Aura Assistant')
+          .toString()
+          .trim();
+
+        const slug = buildProfileSlug({
+          profile,
+          fallbackName: displayName,
+          fallbackId: profile.id
+        });
+
+        const avatarUrl = profile.avatar_url ||
+          (profile.avatar_path ? getPublicAvatarUrl(profile.avatar_path) : null);
+
+        return {
+          id: profile.id,
+          name: displayName,
+          slug,
+          title: profile.title || `${displayName.split(' ')[0] || displayName}'s AI Assistant`,
+          category: 'business',
+          description: profile.bio || 'Professional AI assistant ready to help you.',
+          bio: profile.bio || '',
+          avatar: displayName.charAt(0).toUpperCase(),
+          avatarUrl,
+          rating: 4.7,
+          totalChats: 0,
+          averageMessages: 0,
+          tags: [],
+          categories: [],
+          isVerified: false,
+          lastActive: profile.created_at,
+          responseTime: '—',
+          responseTimeSeconds: 0,
+          email: profile.email || null,
+          tenantId: null,
+          confidence: 0.8,
+          sessionsCount: 0,
+          persona: null,
+          preferences: null
+        };
+      });
+
+      setChatbots(mappedProfiles);
+      setError(null);
+    } catch (directoryError) {
+      if (isPermissionError(directoryError)) {
+        setError('Public access to AI assistants is disabled. Please sign in to continue.');
+      } else {
+        setError('Failed to load chatbots. Please try again.');
+      }
+      console.error('Error loading public profiles:', directoryError);
+      setChatbots([]);
+    }
+  }, [getPublicAvatarUrl, supabase]);
+
   const fetchChatbots = useCallback(async () => {
     try {
       setLoading(true);
@@ -57,11 +141,15 @@ const ExplorePage = () => {
         .select('user_id, tenant_id, email, name, role, persona_settings, voice_preference, created_at');
 
       if (usersError) {
+        if (isPermissionError(usersError)) {
+          await fetchProfilesDirectory();
+          return;
+        }
         throw usersError;
       }
 
       if (!tenantUsers || tenantUsers.length === 0) {
-        setChatbots([]);
+        await fetchProfilesDirectory();
         setError(null);
         return;
       }
@@ -73,9 +161,15 @@ const ExplorePage = () => {
       let personas = [];
       let preferences = [];
       let stats = [];
+      let profiles = [];
 
       if (userIds.length > 0) {
-        const [{ data: personaData, error: personaError }, { data: preferenceData, error: preferenceError }, { data: statsData, error: statsError }] = await Promise.all([
+        const [
+          { data: personaData, error: personaError },
+          { data: preferenceData, error: preferenceError },
+          { data: statsData, error: statsError },
+          { data: profileData, error: profileError }
+        ] = await Promise.all([
           supabase
             .from('user_personas')
             .select('user_id, tenant_id, formality, detail_level, example_style, questioning, energy, confidence, sessions_count, last_updated')
@@ -87,22 +181,49 @@ const ExplorePage = () => {
           supabase
             .from('conversation_summaries')
             .select('user_id, session_id, message_count, timestamp')
-            .in('user_id', userIds)
+            .in('user_id', userIds),
+          supabase
+            .from('profiles')
+            .select('id, username, full_name, email, bio, title, avatar_path, created_at')
+            .in('id', userIds)
         ]);
 
-        if (personaError) throw personaError;
-        if (preferenceError) throw preferenceError;
-        if (statsError) {
-          console.warn('Failed to fetch conversation stats:', statsError);
+        if (personaError) {
+          if (!isPermissionError(personaError)) {
+            throw personaError;
+          }
+        } else {
+          personas = personaData || [];
         }
 
-        personas = personaData || [];
-        preferences = preferenceData || [];
-        stats = statsData || [];
+        if (preferenceError) {
+          if (!isPermissionError(preferenceError)) {
+            throw preferenceError;
+          }
+        } else {
+          preferences = preferenceData || [];
+        }
+
+        if (statsError) {
+          if (!isPermissionError(statsError)) {
+            console.warn('Failed to fetch conversation stats:', statsError);
+          }
+        } else {
+          stats = statsData || [];
+        }
+
+        if (profileError) {
+          if (!isPermissionError(profileError)) {
+            throw profileError;
+          }
+        } else {
+          profiles = profileData || [];
+        }
       }
 
       const personaMap = new Map(personas.map(item => [item.user_id, item]));
       const preferencesMap = new Map(preferences.map(item => [item.user_id, item]));
+      const profileMap = new Map(profiles.map(item => [item.id, item]));
 
       const statsMap = stats.reduce((acc, item) => {
         if (!acc.has(item.user_id)) {
@@ -116,14 +237,24 @@ const ExplorePage = () => {
         const personaSettings = user.persona_settings || {};
         const persona = personaMap.get(user.user_id) || null;
         const preference = preferencesMap.get(user.user_id) || null;
+        const profile = profileMap.get(user.user_id) || null;
         const userStats = statsMap.get(user.user_id) || [];
 
-        const displayName = (personaSettings.display_name || personaSettings.name || user.name || user.email?.split('@')[0] || 'Aura Assistant').toString().trim();
+        const displayName = (
+          personaSettings.display_name ||
+          personaSettings.name ||
+          profile?.full_name ||
+          user.name ||
+          user.email?.split('@')[0] ||
+          'Aura Assistant'
+        ).toString().trim();
 
-        const slug = displayName
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-+|-+$/g, '') || 'aura-assistant';
+        const slug = buildProfileSlug({
+          personaSettings,
+          profile,
+          fallbackName: displayName,
+          fallbackId: user.user_id
+        });
 
         const initials = displayName
           .split(' ')
@@ -133,7 +264,12 @@ const ExplorePage = () => {
           .toUpperCase()
           .substring(0, 2) || 'AA';
 
-        const avatarUrl = personaSettings.avatar_url || personaSettings.avatarUrl || personaSettings.profile_picture || personaSettings.photo_url || null;
+        const avatarUrl = personaSettings.avatar_url ||
+          personaSettings.avatarUrl ||
+          personaSettings.profile_picture ||
+          personaSettings.photo_url ||
+          profile?.avatar_url ||
+          (profile?.avatar_path ? getPublicAvatarUrl(profile.avatar_path) : null);
 
         const expertiseAreas = Array.isArray(preference?.expertise_areas)
           ? preference.expertise_areas.filter(Boolean)
@@ -157,7 +293,12 @@ const ExplorePage = () => {
           category = 'business';
         }
 
-        let description = (personaSettings.bio || personaSettings.description || '').toString().trim();
+        let description = (
+          personaSettings.bio ||
+          personaSettings.description ||
+          profile?.bio ||
+          ''
+        ).toString().trim();
         if (!description) {
           const communication = preference?.communication_style ? `${preference.communication_style} communication style` : null;
           const expertiseText = combinedTags.length > 0 ? `Specializing in ${combinedTags.slice(0, 3).join(', ')}.` : null;
@@ -186,10 +327,10 @@ const ExplorePage = () => {
           id: user.user_id,
           name: displayName,
           slug,
-          title: `${displayName.split(' ')[0] || displayName}'s AI Assistant`,
+          title: personaSettings.title || profile?.title || `${displayName.split(' ')[0] || displayName}'s AI Assistant`,
           category,
           description,
-          bio: personaSettings.bio || '',
+          bio: personaSettings.bio || profile?.bio || '',
           avatar: initials,
           avatarUrl,
           rating: parseFloat(rating.toFixed(1)),
@@ -198,10 +339,10 @@ const ExplorePage = () => {
           tags: combinedTags.slice(0, 3).map(tag => tag.charAt(0).toUpperCase() + tag.slice(1)),
           categories: combinedTags.map(tag => tag.charAt(0).toUpperCase() + tag.slice(1)),
           isVerified: ['owner', 'admin'].includes((user.role || '').toLowerCase()) || totalChats > 50,
-          lastActive: persona?.last_updated || user.created_at,
+          lastActive: persona?.last_updated || user.created_at || profile?.created_at,
           responseTime: responseTimeLabel,
           responseTimeSeconds,
-          email: user.email,
+          email: user.email || profile?.email || null,
           tenantId: user.tenant_id,
           confidence,
           sessionsCount,
@@ -210,8 +351,12 @@ const ExplorePage = () => {
         };
       });
 
-      setChatbots(processedChatbots);
-      setError(null);
+      if (processedChatbots.length === 0) {
+        await fetchProfilesDirectory();
+      } else {
+        setChatbots(processedChatbots);
+        setError(null);
+      }
     } catch (err) {
       setError('Failed to load chatbots. Please try again.');
       console.error('Error fetching chatbots:', err);
@@ -620,8 +765,29 @@ const ExplorePage = () => {
 
 // Individual Chatbot Card Component
 const ChatbotCard = ({ chatbot }) => {
+  const navigate = useNavigate();
+
+  const handleNavigate = () => {
+    if (chatbot.slug) {
+      navigate(`/chat/${chatbot.slug}`);
+    }
+  };
+
+  const handleKeyDown = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleNavigate();
+    }
+  };
+
   return (
-    <div className="chatbot-card">
+    <div
+      className="chatbot-card"
+      role="link"
+      tabIndex={0}
+      onClick={handleNavigate}
+      onKeyDown={handleKeyDown}
+    >
       <div className="card-header">
         <div className="avatar-section">
           <div className="chatbot-avatar">
@@ -676,12 +842,16 @@ const ChatbotCard = ({ chatbot }) => {
       </div>
 
       <div className="card-footer">
-        <Link
-          to={`/chat/${chatbot.slug}`}
+        <button
+          type="button"
           className="btn btn-primary w-full"
+          onClick={(event) => {
+            event.stopPropagation();
+            handleNavigate();
+          }}
         >
           Start Conversation
-        </Link>
+        </button>
       </div>
 
       <style jsx>{`
@@ -692,6 +862,7 @@ const ChatbotCard = ({ chatbot }) => {
           border: 1px solid var(--gray-200);
           transition: all var(--transition-normal);
           box-shadow: var(--shadow-sm);
+          cursor: pointer;
         }
 
         .chatbot-card:hover {
