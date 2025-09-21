@@ -5,7 +5,7 @@
   "description": "Frontend for Aura Voice AI - Create and interact with personalized voice chatbots",
   "author": "Aura Team",
   "license": "MIT",
-  "homepage": ".",
+  "homepage": "/",
   "dependencies": {
     "@supabase/supabase-js": "^2.38.0",
     "axios": "^1.4.0",

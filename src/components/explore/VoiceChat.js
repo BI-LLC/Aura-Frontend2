@@ -87,6 +87,7 @@ const VoiceChat = () => {
       ])).filter(Boolean);
 
       let permissionDenied = false;
+      let lastPermissionError = null;
       let profileRecord = null;
 
       if (slugCandidates.length > 0) {
@@ -99,12 +100,60 @@ const VoiceChat = () => {
         if (profileError) {
           if (isPermissionError(profileError)) {
             permissionDenied = true;
+            lastPermissionError = profileError;
           } else {
             throw profileError;
           }
         } else if (profileMatches && profileMatches.length > 0) {
           profileRecord = profileMatches[0];
         }
+      }
+
+      if (!profileRecord && slugCandidates.length > 0) {
+        const { data: fallbackProfiles, error: fallbackProfilesError } = await supabase
+          .from('profiles')
+          .select('id, username, email, full_name, bio, title, avatar_path, created_at')
+          .limit(200);
+
+        if (fallbackProfilesError) {
+          if (isPermissionError(fallbackProfilesError)) {
+            permissionDenied = true;
+            lastPermissionError = fallbackProfilesError;
+          } else {
+            throw fallbackProfilesError;
+          }
+        } else if (fallbackProfiles && fallbackProfiles.length > 0) {
+          const derivedMatch = fallbackProfiles.find((profileCandidate) => {
+            const fallbackName = (
+              profileCandidate.full_name ||
+              profileCandidate.username ||
+              profileCandidate.email?.split('@')[0] ||
+              'Aura Assistant'
+            )
+              .toString()
+              .trim();
+
+            const derivedSlug = buildProfileSlug({
+              personaSettings: {},
+              profile: profileCandidate,
+              fallbackName,
+              fallbackId: profileCandidate.id
+            });
+
+            return slugCandidates.includes(derivedSlug);
+          });
+
+          if (derivedMatch) {
+            profileRecord = derivedMatch;
+          }
+        }
+      }
+
+      if (!profileRecord) {
+        if (lastPermissionError) {
+          throw lastPermissionError;
+        }
+        throw new Error('Profile not found');
       }
 
       let matchedUser = null;
@@ -205,20 +254,16 @@ const VoiceChat = () => {
       }
 
       if (!matchedUser) {
-        if (profileRecord && permissionDenied) {
-          matchedUser = {
-            user_id: profileRecord.id,
-            tenant_id: null,
-            email: profileRecord.email,
-            name: profileRecord.full_name,
-            role: null,
-            persona_settings: {},
-            voice_preference: null,
-            created_at: profileRecord.created_at
-          };
-        } else {
-          throw new Error('Profile not found');
-        }
+        matchedUser = {
+          user_id: profileRecord.id,
+          tenant_id: null,
+          email: profileRecord.email,
+          name: profileRecord.full_name,
+          role: null,
+          persona_settings: {},
+          voice_preference: null,
+          created_at: profileRecord.created_at
+        };
       }
 
       const [personaResult, preferenceResult, conversationsResult] = await Promise.all([
