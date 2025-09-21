@@ -70,16 +70,7 @@ const VoiceChat = () => {
     return data?.publicUrl || null;
   }, [supabase]);
 
-  // Fetch profile data on component mount
-  useEffect(() => {
-    if (slug) {
-      fetchProfile();
-    }
-  }, [slug, fetchProfile]);
-
   // Fetch user profile from Supabase
-
-
   const fetchProfile = useCallback(async () => {
     try {
       setLoading(true);
@@ -365,6 +356,14 @@ const VoiceChat = () => {
       setLoading(false);
     }
   }, [getPublicAvatarUrl, slug, supabase]);
+
+
+  // Fetch profile data on component mount
+  useEffect(() => {
+    if (slug) {
+      fetchProfile();
+    }
+  }, [slug, fetchProfile]);
 
 
 
