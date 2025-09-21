@@ -1,17 +1,25 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Alert from '../common/Alert';
 import LoadingSpinner from '../common/LoadingSpinner';
 
 const PROFILE_BUCKET = 'profile-avatars';
 
+const getInitialProfile = (currentUser) => {
+  const metadata = currentUser?.user_metadata || {};
+
+  return {
+    fullName: metadata.full_name || '',
+    username: metadata.username || '',
+    title: metadata.title || '',
+    email: currentUser?.email || '',
+    bio: metadata.bio || '',
+    avatarPath: metadata.avatar_path || '',
+    avatarUrl: metadata.avatar_url || ''
+  };
+};
+
 const SettingsTab = ({ user, supabase }) => {
-  const [profile, setProfile] = useState({
-    fullName: user?.user_metadata?.full_name || '',
-    username: user?.user_metadata?.username || '',
-    email: user?.email || '',
-    bio: user?.user_metadata?.bio || '',
-    avatarUrl: user?.user_metadata?.avatar_url || ''
-  });
+  const [profile, setProfile] = useState(() => getInitialProfile(user));
   const [identities, setIdentities] = useState(user?.identities || []);
   const [saving, setSaving] = useState(false);
   const [linking, setLinking] = useState(false);
@@ -19,16 +27,23 @@ const SettingsTab = ({ user, supabase }) => {
   const [initialLoading, setInitialLoading] = useState(true);
   const [tenantUser, setTenantUser] = useState(null);
 
+  const getPublicAvatarUrl = useCallback((path) => {
+    if (!path || !supabase) return null;
+
+    const { data } = supabase.storage.from(PROFILE_BUCKET).getPublicUrl(path);
+    return data?.publicUrl || null;
+  }, [supabase]);
+
   useEffect(() => {
+    const initialProfile = getInitialProfile(user);
+    const publicUrlFromPath = getPublicAvatarUrl(initialProfile.avatarPath);
+
     setProfile({
-      fullName: user?.user_metadata?.full_name || '',
-      username: user?.user_metadata?.username || '',
-      email: user?.email || '',
-      bio: user?.user_metadata?.bio || '',
-      avatarUrl: user?.user_metadata?.avatar_url || ''
+      ...initialProfile,
+      avatarUrl: initialProfile.avatarUrl || publicUrlFromPath || ''
     });
     setIdentities(user?.identities || []);
-  }, [user]);
+  }, [getPublicAvatarUrl, user]);
 
   const googleIdentity = useMemo(
     () => identities?.find((item) => item.provider === 'google'),
@@ -55,7 +70,7 @@ const SettingsTab = ({ user, supabase }) => {
         const [profileResult, tenantResult] = await Promise.all([
           supabase
             .from('profiles')
-            .select('full_name, email')
+            .select('full_name, email, bio, username, title, avatar_path')
             .eq('id', user.id)
             .maybeSingle(),
           supabase
@@ -66,27 +81,38 @@ const SettingsTab = ({ user, supabase }) => {
         ]);
 
         if (profileResult?.data) {
+          const publicUrlFromPath = getPublicAvatarUrl(profileResult.data.avatar_path);
+
           setProfile(prev => ({
             ...prev,
             fullName: profileResult.data.full_name || prev.fullName,
-            email: profileResult.data.email || prev.email
+            email: profileResult.data.email || prev.email,
+            bio: profileResult.data.bio ?? prev.bio,
+            username: profileResult.data.username ?? prev.username,
+            title: profileResult.data.title ?? prev.title,
+            avatarPath: profileResult.data.avatar_path ?? prev.avatarPath,
+            avatarUrl: publicUrlFromPath || prev.avatarUrl
           }));
         }
 
         if (tenantResult?.data) {
           const personaSettings = tenantResult.data.persona_settings || {};
+          const personaAvatarPath = personaSettings.avatar_path || personaSettings.avatarPath;
+          const personaAvatarUrl =
+            personaSettings.avatar_url ||
+            personaSettings.avatarUrl ||
+            personaSettings.profile_picture ||
+            getPublicAvatarUrl(personaAvatarPath);
           setTenantUser(tenantResult.data);
           setProfile(prev => ({
             ...prev,
             fullName: tenantResult.data.name || prev.fullName,
             email: tenantResult.data.email || prev.email,
-            bio: personaSettings.bio || prev.bio,
-            username: personaSettings.username || prev.username,
-            avatarUrl:
-              personaSettings.avatar_url ||
-              personaSettings.avatarUrl ||
-              personaSettings.profile_picture ||
-              prev.avatarUrl
+            bio: personaSettings.bio ?? prev.bio,
+            username: personaSettings.username ?? prev.username,
+            title: personaSettings.title ?? prev.title,
+            avatarPath: personaAvatarPath ?? prev.avatarPath,
+            avatarUrl: personaAvatarUrl || prev.avatarUrl
           }));
         } else {
           setTenantUser(null);
@@ -100,7 +126,7 @@ const SettingsTab = ({ user, supabase }) => {
     };
 
     loadProfileFromSupabase();
-  }, [supabase, user?.id]);
+  }, [getPublicAvatarUrl, supabase, user?.id]);
 
   const handleProfileSave = async (event) => {
     event.preventDefault();
@@ -117,7 +143,9 @@ const SettingsTab = ({ user, supabase }) => {
           full_name: profile.fullName,
           username: profile.username,
           bio: profile.bio,
-          avatar_url: profile.avatarUrl
+          title: profile.title,
+          avatar_url: profile.avatarUrl,
+          avatar_path: profile.avatarPath
         }
       };
 
@@ -139,6 +167,10 @@ const SettingsTab = ({ user, supabase }) => {
           id: user.id,
           full_name: profile.fullName || null,
           email: profile.email || null,
+          username: profile.username || null,
+          bio: profile.bio || null,
+          title: profile.title || null,
+          avatar_path: profile.avatarPath || null,
           updated_at: timestamp
         }, { onConflict: 'id' });
 
@@ -149,7 +181,9 @@ const SettingsTab = ({ user, supabase }) => {
           ...(tenantUser.persona_settings || {}),
           bio: profile.bio,
           username: profile.username,
-          avatar_url: profile.avatarUrl
+          title: profile.title,
+          avatar_url: profile.avatarUrl,
+          avatar_path: profile.avatarPath
         };
 
         const { data: tenantData, error: tenantError } = await supabase
@@ -212,17 +246,30 @@ const SettingsTab = ({ user, supabase }) => {
       const newAvatar = publicUrlData?.publicUrl;
 
       const { error: updateError } = await supabase.auth.updateUser({
-        data: { avatar_url: newAvatar }
+        data: { avatar_url: newAvatar, avatar_path: filePath }
       });
 
       if (updateError) throw updateError;
 
-      setProfile(prev => ({ ...prev, avatarUrl: newAvatar }));
+      const timestamp = new Date().toISOString();
+
+      setProfile(prev => ({ ...prev, avatarUrl: newAvatar, avatarPath: filePath }));
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          avatar_path: filePath,
+          updated_at: timestamp
+        }, { onConflict: 'id' });
+
+      if (profileError) throw profileError;
 
       if (tenantUser?.tenant_id) {
         const updatedPersonaSettings = {
           ...(tenantUser.persona_settings || {}),
-          avatar_url: newAvatar
+          avatar_url: newAvatar,
+          avatar_path: filePath
         };
 
         const { error: tenantUpdateError } = await supabase
@@ -263,7 +310,10 @@ const SettingsTab = ({ user, supabase }) => {
     setLinking(true);
 
     try {
-      const { data, error } = await supabase.auth.linkIdentity({ provider: 'google' });
+      const { data, error } = await supabase.auth.linkIdentity({
+        provider: 'google',
+        options: { redirectTo: window.location.origin }
+      });
       if (error) throw error;
 
       if (data?.url) {
@@ -358,6 +408,16 @@ const SettingsTab = ({ user, supabase }) => {
                   value={profile.username}
                   onChange={(event) => handleProfileChange('username', event.target.value)}
                   placeholder="workspace-handle"
+                />
+              </label>
+
+              <label className="form-control">
+                <span>Title</span>
+                <input
+                  type="text"
+                  value={profile.title}
+                  onChange={(event) => handleProfileChange('title', event.target.value)}
+                  placeholder="Role or headline"
                 />
               </label>
 
