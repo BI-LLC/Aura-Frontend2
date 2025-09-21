@@ -149,7 +149,7 @@ const ExplorePage = () => {
       }
 
       if (!tenantUsers || tenantUsers.length === 0) {
-        setChatbots([]);
+        await fetchProfilesDirectory();
         setError(null);
         return;
       }
@@ -351,8 +351,12 @@ const ExplorePage = () => {
         };
       });
 
-      setChatbots(processedChatbots);
-      setError(null);
+      if (processedChatbots.length === 0) {
+        await fetchProfilesDirectory();
+      } else {
+        setChatbots(processedChatbots);
+        setError(null);
+      }
     } catch (err) {
       setError('Failed to load chatbots. Please try again.');
       console.error('Error fetching chatbots:', err);
