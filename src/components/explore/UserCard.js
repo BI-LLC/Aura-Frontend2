@@ -1,13 +1,15 @@
 // UserCard.js - User Profile Card Component
 // Displays user information and AI personality in the explore section
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { copyTextToClipboard } from '../../utils/clipboard';
 
 const UserCard = ({ user, onChatClick, showActions = true, compact = false }) => {
   const navigate = useNavigate();
   const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('idle');
 
   // Default placeholder data if user prop is incomplete
   const userData = {
@@ -57,9 +59,27 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
     return personality.charAt(0).toUpperCase() + personality.slice(1);
   };
 
+  const profileUrl = useMemo(() => {
+    if (!userData.slug) {
+      return '';
+    }
+
+    const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
+    return origin ? `${origin}/profile/${userData.slug}` : `/profile/${userData.slug}`;
+  }, [userData.slug]);
+
   useEffect(() => {
     setImageError(false);
   }, [userData.avatarUrl, userData.id]);
+
+  useEffect(() => {
+    if (copyStatus === 'idle') {
+      return undefined;
+    }
+
+    const timeout = setTimeout(() => setCopyStatus('idle'), 2500);
+    return () => clearTimeout(timeout);
+  }, [copyStatus]);
 
   /**
    * Get status indicator color
@@ -106,6 +126,18 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
         <span className="rating-number">({userData.rating})</span>
       </div>
     );
+  };
+
+  const handleShareProfile = async (event) => {
+    event.stopPropagation();
+
+    if (!profileUrl) {
+      setCopyStatus('error');
+      return;
+    }
+
+    const success = await copyTextToClipboard(profileUrl);
+    setCopyStatus(success ? 'copied' : 'error');
   };
 
   // Compact card for smaller spaces
@@ -249,7 +281,19 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
       {/* Card Footer */}
       {showActions && (
         <div className="card-footer">
-          <button 
+          <button
+            type="button"
+            className={`btn secondary share-btn ${copyStatus === 'copied' ? 'copied' : ''}`}
+            onClick={handleShareProfile}
+            disabled={!profileUrl}
+          >
+            {copyStatus === 'copied'
+              ? 'Link Copied!'
+              : copyStatus === 'error'
+              ? 'Copy Failed'
+              : 'Share Profile'}
+          </button>
+          <button
             className="btn secondary"
             onClick={handleViewProfile}
           >

@@ -4,6 +4,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import {
+  getUserDisplayName,
+  getUserEmail,
+  getUserInitials,
+  getUserUsername
+} from '../../utils/userDisplay';
 
 /**
  * Navbar Component
@@ -85,6 +91,10 @@ const Navbar = () => {
   ];
 
   const navItems = isAuthenticated ? authenticatedNavItems : publicNavItems;
+  const displayName = getUserDisplayName(user);
+  const displayEmail = getUserEmail(user);
+  const username = getUserUsername(user);
+  const avatarInitial = getUserInitials(user, 1);
 
   return (
     <>
@@ -124,9 +134,16 @@ const Navbar = () => {
                     className="user-menu-trigger"
                   >
                     <div className="user-avatar">
-                      {user?.name?.charAt(0)?.toUpperCase() || 'U'}
+                      {avatarInitial}
                     </div>
-                    <span className="user-name">{user?.name || 'User'}</span>
+                    <div className="user-menu-labels">
+                      <span className="user-name">{displayName}</span>
+                      {(username || displayEmail) && (
+                        <span className="user-username">
+                          {username ? `@${username}` : displayEmail}
+                        </span>
+                      )}
+                    </div>
                     <svg
                       className={`chevron ${isUserMenuOpen ? 'rotated' : ''}`}
                       width="16"
@@ -145,14 +162,15 @@ const Navbar = () => {
                     <div className="user-menu-dropdown">
                       <div className="user-menu-header">
                         <div className="user-menu-avatar">
-                          {user?.name?.charAt(0)?.toUpperCase() || 'U'}
+                          {avatarInitial}
                         </div>
                         <div className="user-menu-info">
-                          <div className="user-menu-name">{user?.name}</div>
-                          <div className="user-menu-email">{user?.email}</div>
+                          <div className="user-menu-name">{displayName}</div>
+                          {username && <div className="user-menu-username">@{username}</div>}
+                          {displayEmail && <div className="user-menu-email">{displayEmail}</div>}
                         </div>
                       </div>
-                      
+
                       <div className="user-menu-divider" />
                       
                       <div className="user-menu-items">
@@ -224,14 +242,15 @@ const Navbar = () => {
                   <div className="mobile-user-section">
                     <div className="mobile-user-info">
                       <div className="mobile-user-avatar">
-                        {user?.name?.charAt(0)?.toUpperCase() || 'U'}
+                        {avatarInitial}
                       </div>
                       <div>
-                        <div className="mobile-user-name">{user?.name}</div>
-                        <div className="mobile-user-email">{user?.email}</div>
+                        <div className="mobile-user-name">{displayName}</div>
+                        {username && <div className="mobile-user-username">@{username}</div>}
+                        {displayEmail && <div className="mobile-user-email">{displayEmail}</div>}
                       </div>
                     </div>
-                    
+
                     <div className="mobile-user-actions">
                       <Link to="/dashboard" className="mobile-menu-item">
                         Dashboard
@@ -392,10 +411,22 @@ const Navbar = () => {
           font-size: var(--text-sm);
         }
 
+        .user-menu-labels {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          line-height: 1.2;
+        }
+
         .user-name {
           font-weight: var(--font-weight-medium);
-          color: var(--gray-700);
+          color: var(--gray-800);
           font-size: var(--text-sm);
+        }
+
+        .user-username {
+          font-size: var(--text-xs);
+          color: var(--gray-500);
         }
 
         .chevron {
@@ -448,6 +479,12 @@ const Navbar = () => {
         .user-menu-name {
           font-weight: var(--font-weight-semibold);
           color: var(--gray-900);
+          margin-bottom: var(--space-1);
+        }
+
+        .user-menu-username {
+          color: var(--gray-500);
+          font-size: var(--text-xs);
           margin-bottom: var(--space-1);
         }
 
@@ -623,6 +660,12 @@ const Navbar = () => {
           font-weight: var(--font-weight-semibold);
           color: var(--gray-900);
           margin-bottom: var(--space-1);
+        }
+
+        .mobile-user-username {
+          font-size: var(--text-xs);
+          color: var(--gray-500);
+          margin-bottom: 2px;
         }
 
         .mobile-user-email {
