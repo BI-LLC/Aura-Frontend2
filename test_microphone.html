@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Microphone Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .info { background-color: #d1ecf1; color: #0c5460; }
+        .audio-level {
+            width: 100%;
+            height: 20px;
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .audio-level-fill {
+            height: 100%;
+            background-color: #4CAF50;
+            transition: width 0.1s ease;
+        }
+    </style>
+</head>
+<body>
+    <h1>Microphone Test Suite</h1>
+    
+    <div class="test-section">
+        <h2>1. Browser Compatibility Check</h2>
+        <button onclick="checkBrowserSupport()">Check Browser Support</button>
+        <div id="browser-status"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Microphone Permission Test</h2>
+        <button onclick="testMicrophonePermission()">Test Microphone Permission</button>
+        <div id="permission-status"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. Audio Stream Test</h2>
+        <button onclick="testAudioStream()">Test Audio Stream</button>
+        <div id="stream-status"></div>
+        <div class="audio-level">
+            <div id="audio-level-fill" class="audio-level-fill" style="width: 0%"></div>
+        </div>
+        <div id="audio-level-text">Audio Level: 0</div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. MediaRecorder Test</h2>
+        <button onclick="testMediaRecorder()">Test MediaRecorder</button>
+        <div id="recorder-status"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>5. Audio Format Support</h2>
+        <button onclick="checkAudioFormats()">Check Supported Formats</button>
+        <div id="format-status"></div>
+    </div>
+
+    <script>
+        let audioStream = null;
+        let mediaRecorder = null;
+        let audioContext = null;
+        let analyser = null;
+        let isMonitoring = false;
+
+        function log(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        function checkBrowserSupport() {
+            const support = {
+                getUserMedia: !!navigator.mediaDevices?.getUserMedia,
+                MediaRecorder: !!window.MediaRecorder,
+                AudioContext: !!(window.AudioContext || window.webkitAudioContext),
+                permissions: !!navigator.permissions
+            };
+
+            let message = '<h3>Browser Support:</h3><ul>';
+            message += `<li>getUserMedia: ${support.getUserMedia ? '✅' : '❌'}</li>`;
+            message += `<li>MediaRecorder: ${support.MediaRecorder ? '✅' : '❌'}</li>`;
+            message += `<li>AudioContext: ${support.AudioContext ? '✅' : '❌'}</li>`;
+            message += `<li>Permissions API: ${support.permissions ? '✅' : '❌'}</li>`;
+            message += '</ul>';
+
+            const allSupported = Object.values(support).every(Boolean);
+            log('browser-status', message, allSupported ? 'success' : 'error');
+        }
+
+        async function testMicrophonePermission() {
+            try {
+                if (navigator.permissions) {
+                    const permission = await navigator.permissions.query({ name: 'microphone' });
+                    log('permission-status', `Permission Status: ${permission.state}`, 'info');
+                } else {
+                    log('permission-status', 'Permissions API not supported', 'info');
+                }
+            } catch (error) {
+                log('permission-status', `Permission check failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testAudioStream() {
+            try {
+                log('stream-status', 'Requesting microphone access...', 'info');
+                
+                audioStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: 16000,
+                        channelCount: 1,
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+
+                log('stream-status', '✅ Microphone access granted!', 'success');
+                
+                // Test audio levels
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                const microphone = audioContext.createMediaStreamSource(audioStream);
+                microphone.connect(analyser);
+
+                startAudioMonitoring();
+
+            } catch (error) {
+                log('stream-status', `❌ Microphone access failed: ${error.message}`, 'error');
+            }
+        }
+
+        function startAudioMonitoring() {
+            if (isMonitoring) return;
+            isMonitoring = true;
+
+            const monitor = () => {
+                if (!isMonitoring) return;
+
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(dataArray);
+                const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+                
+                document.getElementById('audio-level-fill').style.width = `${Math.min(average * 2, 100)}%`;
+                document.getElementById('audio-level-text').textContent = `Audio Level: ${average.toFixed(2)}`;
+                
+                requestAnimationFrame(monitor);
+            };
+            
+            monitor();
+        }
+
+        function stopAudioMonitoring() {
+            isMonitoring = false;
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+                audioStream = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+        }
+
+        async function testMediaRecorder() {
+            try {
+                if (!audioStream) {
+                    log('recorder-status', 'Please test audio stream first', 'error');
+                    return;
+                }
+
+                const mimeTypes = [
+                    'audio/webm;codecs=opus',
+                    'audio/webm',
+                    'audio/mp4',
+                    'audio/wav'
+                ];
+
+                let supportedFormat = null;
+                for (const mimeType of mimeTypes) {
+                    if (MediaRecorder.isTypeSupported(mimeType)) {
+                        supportedFormat = mimeType;
+                        break;
+                    }
+                }
+
+                if (!supportedFormat) {
+                    log('recorder-status', '❌ No supported audio formats found', 'error');
+                    return;
+                }
+
+                log('recorder-status', `✅ Using format: ${supportedFormat}`, 'success');
+
+                mediaRecorder = new MediaRecorder(audioStream, {
+                    mimeType: supportedFormat,
+                    audioBitsPerSecond: 128000
+                });
+
+                const chunks = [];
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        chunks.push(event.data);
+                        log('recorder-status', `✅ Audio chunk received: ${event.data.size} bytes`, 'success');
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: supportedFormat });
+                    log('recorder-status', `✅ Recording completed: ${blob.size} bytes total`, 'success');
+                };
+
+                mediaRecorder.start(1000); // 1-second chunks
+                log('recorder-status', '🎤 Recording started...', 'info');
+
+                // Stop after 3 seconds
+                setTimeout(() => {
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
+                        mediaRecorder.stop();
+                    }
+                }, 3000);
+
+            } catch (error) {
+                log('recorder-status', `❌ MediaRecorder test failed: ${error.message}`, 'error');
+            }
+        }
+
+        function checkAudioFormats() {
+            const formats = [
+                'audio/webm;codecs=opus',
+                'audio/webm',
+                'audio/mp4',
+                'audio/wav',
+                'audio/mpeg',
+                'audio/ogg;codecs=opus'
+            ];
+
+            let message = '<h3>Supported Audio Formats:</h3><ul>';
+            formats.forEach(format => {
+                const supported = MediaRecorder.isTypeSupported(format);
+                message += `<li>${format}: ${supported ? '✅' : '❌'}</li>`;
+            });
+            message += '</ul>';
+
+            log('format-status', message, 'info');
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            stopAudioMonitoring();
+        });
+    </script>
+</body>
+</html>
