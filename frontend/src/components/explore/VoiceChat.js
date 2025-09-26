@@ -611,7 +611,7 @@ const VoiceChat = () => {
     }
   };
 
-  // Navigate to dedicated voice call session
+  // Navigate to production voice chat (HTTP-based, more stable)
   const handleStartCall = () => {
     if (!isAuthenticated) {
       setShowLoginPrompt(true);
@@ -620,9 +620,8 @@ const VoiceChat = () => {
 
     setShowLoginPrompt(false);
 
-    if (profile?.slug) {
-      navigate(`/chat/${profile.slug}/call`, { state: { profile } });
-    }
+    // Use the improved ProductionVoiceChat instead of WebSocket-based VoiceCallSession
+    navigate(`/voice`);
   };
 
   // Format date
@@ -743,7 +742,22 @@ const VoiceChat = () => {
             >
               Start Call
             </button>
-            <button className="btn btn-secondary btn-lg">
+            <button 
+              className="btn btn-secondary btn-lg"
+              onClick={() => {
+                const chatSection = document.querySelector('.chat-section');
+                if (chatSection) {
+                  chatSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  // Focus on the chat input after scrolling
+                  setTimeout(() => {
+                    const chatInput = document.querySelector('.chat-input');
+                    if (chatInput) {
+                      chatInput.focus();
+                    }
+                  }, 500);
+                }
+              }}
+            >
               Open Chat
             </button>
           </div>
