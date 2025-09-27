@@ -227,17 +227,35 @@ const VoiceCallSession = () => {
         return null;
       }
 
+      const voicePreference =
+        profile?.voicePreference ||
+        profile?.voice_preference ||
+        null;
+      const voiceId =
+        (typeof voicePreference === 'string' ? voicePreference : null) ||
+        voicePreference?.voice_id ||
+        voicePreference?.voiceId ||
+        voicePreference?.params?.voice_id ||
+        voicePreference?.params?.voiceId ||
+        null;
+
+      const params = new URLSearchParams({
+        text: text.substring(0, 500),
+        stability: '0.5',
+        similarity_boost: '0.75',
+      });
+
+      if (voiceId) {
+        params.append('voice_id', voiceId);
+      }
+
       const response = await fetch(`${API_BASE_URL}/voice/synthesize`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           Authorization: `Bearer ${token}`,
         },
-        body: new URLSearchParams({
-          text: text.substring(0, 500),
-          stability: '0.5',
-          similarity_boost: '0.75',
-        }),
+        body: params,
       });
 
       if (!response.ok) {
@@ -273,7 +291,7 @@ const VoiceCallSession = () => {
 
       return null;
     },
-    [getToken]
+    [getToken, profile]
   );
 
   const playAssistantAudio = useCallback(
