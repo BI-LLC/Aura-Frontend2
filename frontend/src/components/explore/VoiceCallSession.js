@@ -25,6 +25,9 @@ const VoiceCallSession = () => {
   const location = useLocation();
 
   const navigationProfile = location.state?.profile || null;
+  const assistantKey = profile?.slug || slug || '';
+  const tenantId = profile?.tenantId || profile?.tenant_id || '';
+
 
   const [profile] = useState(navigationProfile);
   const [isMuted, setIsMuted] = useState(false);
@@ -226,7 +229,7 @@ const VoiceCallSession = () => {
       if (!token || !text || !text.trim()) {
         return null;
       }
-
+  
       const voicePreference =
         profile?.voicePreference ||
         profile?.voice_preference ||
@@ -238,40 +241,22 @@ const VoiceCallSession = () => {
         voicePreference?.params?.voice_id ||
         voicePreference?.params?.voiceId ||
         null;
-
-      const assistantKeyCandidates = [
-        profile?.persona?.assistant_key,
-        profile?.persona?.assistantKey,
-        profile?.persona?.slug,
-        profile?.slug,
-        slug,
-      ]
-        .map((value) => (value ? value.toString().trim() : ''))
-        .filter(Boolean);
-      const assistantKey = assistantKeyCandidates[0] || '';
-
-      const tenantIdRaw =
-        profile?.tenantId ||
-        profile?.tenant_id ||
-        profile?.tenant?.id ||
-        '';
-      const tenantId = tenantIdRaw ? tenantIdRaw.toString().trim() : '';
-
+  
+      // ✅ Build params with assistant_key always present
       const params = new URLSearchParams({
         text: text.substring(0, 500),
         stability: '0.5',
         similarity_boost: '0.75',
         assistant_key: assistantKey,
       });
-
+  
       if (tenantId) {
         params.append('tenant_id', tenantId);
       }
-
       if (voiceId) {
         params.append('voice_id', voiceId);
       }
-
+  
       const response = await fetch(`${API_BASE_URL}/voice/synthesize`, {
         method: 'POST',
         headers: {
@@ -280,42 +265,29 @@ const VoiceCallSession = () => {
         },
         body: params,
       });
-
+  
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
-        throw new Error(`Speech synthesis failed: ${response.status}${errorText ? ` - ${errorText}` : ''}`);
+        throw new Error(
+          `Speech synthesis failed: ${response.status}${
+            errorText ? ` - ${errorText}` : ''
+          }`
+        );
       }
-
+  
       const result = await response.json();
-
-      if (result?.success === false) {
-        throw new Error(result?.message || 'Speech synthesis unavailable.');
-      }
-
       if (result?.audio) {
         return {
           base64: result.audio,
-          contentType: result?.content_type || result?.mime_type || 'audio/mpeg',
+          contentType: result?.content_type || 'audio/mpeg',
         };
       }
-
-      if (result?.audioContent) {
-        return {
-          base64: result.audioContent,
-          contentType: result?.contentType || 'audio/mpeg',
-        };
-      }
-
-      if (result?.audio_url || result?.url) {
-        return {
-          url: result.audio_url || result.url,
-        };
-      }
-
+  
       return null;
     },
-    [getToken, profile, slug]
+    [getToken, profile, slug, assistantKey, tenantId]
   );
+
 
   const playAssistantAudio = useCallback(
     async (text) => {
