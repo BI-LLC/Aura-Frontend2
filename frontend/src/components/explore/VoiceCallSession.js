@@ -37,6 +37,8 @@ const VoiceCallSession = () => {
   const transcriptRef = useRef(null);
   const websocketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const isMutedRef = useRef(false);
   const { getToken } = useAuth();
 
   const assistantName = profile?.name || 'Aura Assistant';
@@ -233,12 +235,13 @@ const VoiceCallSession = () => {
       });
 
       mediaRecorderRef.current = mediaRecorder;
+      streamRef.current = stream;
 
       mediaRecorder.ondataavailable = (event) => {
         if (
           event.data.size > 0 &&
           websocketRef.current?.readyState === WebSocket.OPEN &&
-          !isMuted
+          !isMutedRef.current
         ) {
           const reader = new FileReader();
           reader.onload = () => {
@@ -256,12 +259,13 @@ const VoiceCallSession = () => {
 
       mediaRecorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       };
 
       mediaRecorder.start(250);
       setIsRecording(true);
       setIsProcessing(false);
-      setIsMuted(false);
+      setMuteState(false);
 
       setTranscript((prev) => [
         ...prev,
@@ -305,21 +309,16 @@ const VoiceCallSession = () => {
     ]);
   };
 
-  const disconnectWebSocket = () => {
-    if (websocketRef.current) {
-      websocketRef.current.close();
-      websocketRef.current = null;
-    }
-    setIsConnected(false);
-    setIsRecording(false);
-  };
-
   useEffect(() => {
     return () => {
       if (mediaRecorderRef.current) {
         if (mediaRecorderRef.current.state === 'recording') {
           mediaRecorderRef.current.stop();
         }
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
       disconnectWebSocket();
     };
@@ -331,13 +330,30 @@ const VoiceCallSession = () => {
     }
   }, [transcript]);
 
+  const setMuteState = (muted) => {
+    isMutedRef.current = muted;
+    setIsMuted(muted);
+
+    if (streamRef.current) {
+      streamRef.current.getAudioTracks().forEach((track) => {
+        track.enabled = !muted;
+      });
+    }
+  };
+
+  const disconnectWebSocket = () => {
+    if (websocketRef.current) {
+      websocketRef.current.close();
+      websocketRef.current = null;
+    }
+    setMuteState(false);
+    setIsConnected(false);
+    setIsRecording(false);
+  };
+
   const handlePrimaryControl = async () => {
     if (isRecording) {
-      if (isMuted) {
-        setIsMuted(false);
-      } else {
-        setIsMuted(true);
-      }
+      setMuteState(!isMutedRef.current);
       return;
     }
 
