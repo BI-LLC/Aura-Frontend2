@@ -38,13 +38,39 @@ const VoiceCallSession = () => {
   const websocketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
-  const { user, getToken, isAuthenticated } = useAuth();
+  const { getToken } = useAuth();
 
   const assistantName = profile?.name || 'Aura Assistant';
   const assistantFirstName = useMemo(
     () => assistantName.split(' ')[0] || 'Aura',
     [assistantName]
   );
+
+  const connectionLabel = useMemo(() => {
+    if (isAssistantSpeaking) {
+      return `${assistantFirstName} is speaking`;
+    }
+    if (isConnected) {
+      return 'Live conversation';
+    }
+    if (connectionError) {
+      return 'Connection error';
+    }
+    return 'Ready to connect';
+  }, [assistantFirstName, connectionError, isAssistantSpeaking, isConnected]);
+
+  const connectionTone = useMemo(() => {
+    if (connectionError) {
+      return 'error';
+    }
+    if (isAssistantSpeaking) {
+      return 'speaking';
+    }
+    if (isConnected) {
+      return 'connected';
+    }
+    return 'idle';
+  }, [connectionError, isAssistantSpeaking, isConnected]);
 
   useEffect(() => {
     if (!profile) {
@@ -357,426 +383,508 @@ const VoiceCallSession = () => {
 
   return (
     <div className="voice-call-page">
-      <div className="container">
-        <div className="call-layout">
-          <div className="call-stage">
-            <div className="call-header">
-              <button
-                type="button"
-                className="back-button"
-                onClick={handleBack}
-                aria-label="Back to assistant profile"
-              >
-                ← Back
-              </button>
-              <div className="call-status">
-                <span
-                  className={`status-indicator ${isAssistantSpeaking ? 'speaking' : isConnected ? 'listening' : 'disconnected'}`}
-                  aria-hidden="true"
-                />
-                <div>
-                  <p className="status-title">
-                    {isAssistantSpeaking ? `${assistantFirstName} is speaking` : 
-                     isConnected ? 'Live conversation' : 
-                     connectionError ? 'Connection error' : 'Not connected'}
-                  </p>
-                  <p className="status-time">{formatDuration(elapsedSeconds)}</p>
-                </div>
+      <div className="call-shell">
+        <section className="call-experience">
+          <header className="experience-header">
+            <button
+              type="button"
+              className="header-button back"
+              onClick={handleBack}
+              aria-label="Back to assistant profile"
+            >
+              <span aria-hidden="true">←</span>
+              <span>Back</span>
+            </button>
+            <div className={`connection-pill ${connectionTone}`}>
+              <span className="pill-indicator" aria-hidden="true" />
+              <span className="pill-text">{connectionLabel}</span>
+              <span className="pill-separator" aria-hidden="true">•</span>
+              <span className="pill-time">{formatDuration(elapsedSeconds)}</span>
+            </div>
+            <button type="button" className="header-button end" onClick={handleEndCall}>
+              End call
+            </button>
+          </header>
+
+          <div className="experience-body" role="status" aria-live="polite">
+            <div
+              className={`avatar-orb ${isAssistantSpeaking ? 'speaking' : ''} ${
+                isRecording ? 'recording' : ''
+              }`}
+            >
+              <div className="orb-backdrop" aria-hidden="true" />
+              <div className="avatar-inner">
+                {profile.avatarUrl && !avatarFailed ? (
+                  <img
+                    src={profile.avatarUrl}
+                    alt={`${assistantName} avatar`}
+                    onError={() => setAvatarFailed(true)}
+                  />
+                ) : (
+                  <span>{profile.avatar}</span>
+                )}
               </div>
-              <button type="button" className="end-call-button" onClick={handleEndCall}>
-                End Call
-              </button>
+              <div
+                className={`voice-wave ${
+                  isAssistantSpeaking || isRecording ? 'active' : ''
+                }`}
+                aria-hidden="true"
+              >
+                <span />
+                <span />
+                <span />
+                <span />
+              </div>
             </div>
 
-            <div className="call-visualizer" role="status" aria-live="polite">
-              <div className={`voice-circle ${isAssistantSpeaking ? 'active' : ''}`}>
-                <div className="pulse-ring ring-1" aria-hidden="true" />
-                <div className="pulse-ring ring-2" aria-hidden="true" />
-                <div className="pulse-ring ring-3" aria-hidden="true" />
-                <div className="avatar-shell">
-                  {profile.avatarUrl && !avatarFailed ? (
-                    <img
-                      src={profile.avatarUrl}
-                      alt={`${assistantName} avatar`}
-                      onError={() => setAvatarFailed(true)}
-                    />
-                  ) : (
-                    <span>{profile.avatar}</span>
-                  )}
-                </div>
-                <div className="equalizer" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
+            <div className="identity-block">
+              <h1>{assistantName}</h1>
+              {profile.title && <p>{profile.title}</p>}
+            </div>
 
-              <div className="assistant-meta">
-                <h1>{assistantName}</h1>
-                {profile.title && <p>{profile.title}</p>}
-              </div>
+            <div className="call-state">
+              <p className="state-title">{connectionLabel}</p>
+              <p className="state-subtitle">
+                {connectionError
+                  ? connectionError
+                  : isConnected
+                  ? 'Your audio is streaming live to the assistant.'
+                  : 'Tap start to begin a hands-free conversation.'}
+              </p>
+            </div>
 
-              <div className="call-controls">
-                {!isRecording ? (
-                  <button
-                    type="button"
-                    className="control-btn start"
-                    onClick={startVoiceChat}
-                    disabled={isProcessing || connectionError}
-                  >
-                    {isProcessing ? 'Processing...' : 
-                     connectionError ? 'Connection Error' :
-                     !isConnected ? 'Connect & Start' : 'Start Voice Chat'}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="control-btn stop"
-                    onClick={stopVoiceChat}
-                  >
-                    Stop Recording
-                  </button>
-                )}
-                <button type="button" className="control-btn end" onClick={handleEndCall}>
-                  End call
+            <div className="call-actions">
+              {!isRecording ? (
+                <button
+                  type="button"
+                  className="primary-action"
+                  onClick={startVoiceChat}
+                  disabled={isProcessing || connectionError}
+                >
+                  {isProcessing
+                    ? 'Processing...'
+                    : connectionError
+                    ? 'Connection error'
+                    : isConnected
+                    ? 'Start talking'
+                    : 'Connect & start'}
                 </button>
-              </div>
+              ) : (
+                <button type="button" className="secondary-action" onClick={stopVoiceChat}>
+                  Stop recording
+                </button>
+              )}
+              <button type="button" className="ghost-action" onClick={handleEndCall}>
+                End call
+              </button>
             </div>
           </div>
+        </section>
 
-          <aside className="transcription-panel">
-            <div className="transcription-header">
-              <h2>Live transcript</h2>
-              <span className="transcription-status">Capturing both sides in real time</span>
-            </div>
+        <aside className="transcription-panel">
+          <div className="transcription-header">
+            <h2>Live transcript</h2>
+            <span className="transcription-status">Capturing both sides in real time</span>
+          </div>
 
-            <div className="transcription-body" ref={transcriptRef}>
-              {transcript.length === 0 && (
-                <div className="transcription-placeholder">
-                  <LoadingSpinner size="small" />
-                  <p>Ready for voice conversation. Click "Start Voice Chat" to begin.</p>
-                </div>
-              )}
+          <div className="transcription-body" ref={transcriptRef}>
+            {transcript.length === 0 && (
+              <div className="transcription-placeholder">
+                <LoadingSpinner size="small" />
+                <p>Ready for voice conversation. Click "Start Voice Chat" to begin.</p>
+              </div>
+            )}
 
-              {transcript.map((line, index) => (
-                <div
-                  key={`${line.speaker}-${index}`}
-                  className={`transcription-line ${
-                    line.speaker === 'You' ? 'user-line' : 
-                    line.speaker === assistantName ? 'assistant-line' : 'system-line'
-                  }`}
-                >
+            {transcript.map((line, index) => (
+              <div
+                key={`${line.speaker}-${index}`}
+                className={`transcription-line ${
+                  line.speaker === 'You'
+                    ? 'user-line'
+                    : line.speaker === assistantName
+                    ? 'assistant-line'
+                    : 'system-line'
+                }`}
+              >
+                <div className="line-meta">
                   <span className="speaker">{line.speaker}</span>
-                  <span className="text">{line.text}</span>
                   {line.timestamp && (
-                    <span className="timestamp">
-                      {line.timestamp.toLocaleTimeString()}
-                    </span>
+                    <span className="timestamp">{line.timestamp.toLocaleTimeString()}</span>
                   )}
                 </div>
-              ))}
+                <div className="text">{line.text}</div>
+              </div>
+            ))}
 
-              {isRecording && (
-                <div className="transcription-line user-line recording">
+            {isRecording && (
+              <div className="transcription-line user-line recording">
+                <div className="line-meta">
                   <span className="speaker">You</span>
-                  <span className="recording-indicator">
-                    <span />
-                    <span />
-                    <span />
-                    <span />
-                  </span>
                 </div>
-              )}
+                <span className="recording-indicator">
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              </div>
+            )}
 
-              {isProcessing && (
-                <div className="transcription-line assistant-line processing">
+            {isProcessing && (
+              <div className="transcription-line assistant-line processing">
+                <div className="line-meta">
                   <span className="speaker">{assistantName}</span>
-                  <span className="processing-indicator">
-                    <span />
-                    <span />
-                    <span />
-                  </span>
                 </div>
-              )}
-            </div>
-          </aside>
-        </div>
+                <span className="processing-indicator">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
 
       <style jsx>{`
         .voice-call-page {
-          padding: var(--space-12) 0;
           min-height: calc(100vh - 80px);
-          background: radial-gradient(circle at top, rgba(67, 97, 238, 0.1), transparent 55%),
-            var(--gray-50);
+          padding: var(--space-12) var(--space-6);
+          background: radial-gradient(circle at top, rgba(67, 97, 238, 0.16), transparent 58%),
+            linear-gradient(180deg, var(--gray-50), var(--gray-100));
+          display: flex;
+          justify-content: center;
+          align-items: center;
         }
 
-        .call-layout {
+        .call-shell {
+          width: min(1180px, 100%);
           display: grid;
-          grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+          grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
           gap: var(--space-8);
+          align-items: stretch;
         }
 
-        .call-stage {
-          background: rgba(255, 255, 255, 0.92);
-          border-radius: var(--radius-3xl);
+        .call-experience {
+          position: relative;
+          background: var(--white);
+          border-radius: var(--radius-4xl);
           padding: var(--space-8);
-          box-shadow: var(--shadow-xl);
-          backdrop-filter: blur(12px);
+          box-shadow: 0 28px 60px rgba(15, 23, 42, 0.18);
+          overflow: hidden;
           display: flex;
           flex-direction: column;
-          justify-content: space-between;
         }
 
-        .call-header {
+        .call-experience::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(140deg, rgba(59, 130, 246, 0.08), transparent 55%),
+            linear-gradient(320deg, rgba(14, 165, 233, 0.08), transparent 45%);
+          pointer-events: none;
+        }
+
+        .experience-header {
+          position: relative;
+          z-index: 1;
           display: flex;
-          justify-content: space-between;
           align-items: center;
-          margin-bottom: var(--space-10);
+          justify-content: space-between;
           gap: var(--space-4);
+          margin-bottom: var(--space-8);
         }
 
-        .back-button {
-          border: none;
-          background: transparent;
+        .header-button {
+          display: inline-flex;
+          align-items: center;
+          gap: var(--space-2);
+          border-radius: var(--radius-xl);
+          padding: var(--space-2) var(--space-4);
+          font-size: var(--text-sm);
+          font-weight: var(--font-weight-medium);
+          border: 1px solid rgba(15, 23, 42, 0.08);
+          background: rgba(248, 250, 252, 0.9);
+          color: var(--gray-800);
+          cursor: pointer;
+          transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+        }
+
+        .header-button:hover {
+          transform: translateY(-1px);
+          box-shadow: var(--shadow-sm);
+          background: var(--white);
+        }
+
+        .header-button.end {
+          background: rgba(248, 113, 113, 0.14);
+          color: var(--error-600);
+          border-color: rgba(248, 113, 113, 0.3);
+        }
+
+        .header-button.end:hover {
+          background: var(--error-500);
+          color: var(--white);
+          box-shadow: 0 10px 25px rgba(248, 113, 113, 0.3);
+        }
+
+        .connection-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: var(--space-2);
+          border-radius: 999px;
+          padding: var(--space-2) var(--space-4);
+          background: rgba(67, 97, 238, 0.12);
           color: var(--primary-600);
           font-weight: var(--font-weight-medium);
-          cursor: pointer;
-          font-size: var(--text-base);
-          padding: var(--space-2) var(--space-3);
-          border-radius: var(--radius-lg);
-          transition: background var(--transition-fast);
+          box-shadow: inset 0 0 0 1px rgba(67, 97, 238, 0.2);
         }
 
-        .back-button:hover {
-          background: rgba(67, 97, 238, 0.08);
+        .connection-pill .pill-indicator {
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          background: currentColor;
         }
 
-        .call-status {
-          display: flex;
-          align-items: center;
-          gap: var(--space-3);
+        .connection-pill.speaking {
+          background: rgba(34, 197, 94, 0.14);
+          color: var(--success-600);
+          box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.2);
         }
 
-        .status-indicator {
-          width: 14px;
-          height: 14px;
-          border-radius: 50%;
-          box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.2);
-          background: var(--success-500);
-          animation: pulse-soft 1.6s infinite ease-in-out;
+        .connection-pill.connected {
+          background: rgba(59, 130, 246, 0.14);
+          color: var(--primary-600);
         }
 
-        .status-indicator.listening {
-          background: var(--primary-500);
-          box-shadow: 0 0 0 6px rgba(67, 97, 238, 0.18);
+        .connection-pill.error {
+          background: rgba(248, 113, 113, 0.16);
+          color: var(--error-600);
+          box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.24);
         }
 
-        .status-indicator.disconnected {
-          background: var(--gray-400);
-          box-shadow: 0 0 0 6px rgba(156, 163, 175, 0.18);
-          animation: none;
+        .connection-pill .pill-separator {
+          opacity: 0.6;
         }
 
-        .status-title {
-          font-size: var(--text-lg);
-          font-weight: var(--font-weight-semibold);
-          color: var(--gray-900);
-        }
-
-        .status-time {
-          color: var(--gray-600);
+        .connection-pill .pill-time {
+          font-variant-numeric: tabular-nums;
           font-size: var(--text-sm);
         }
 
-        .end-call-button {
-          background: var(--error-500);
-          color: var(--white);
-          border: none;
-          border-radius: var(--radius-lg);
-          padding: var(--space-3) var(--space-4);
-          font-weight: var(--font-weight-semibold);
-          cursor: pointer;
-          box-shadow: var(--shadow-sm);
-          transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-        }
-
-        .end-call-button:hover {
-          transform: translateY(-1px);
-          box-shadow: var(--shadow-md);
-        }
-
-        .call-visualizer {
+        .experience-body {
+          position: relative;
+          z-index: 1;
           display: flex;
           flex-direction: column;
           align-items: center;
           text-align: center;
-          gap: var(--space-8);
+          gap: var(--space-6);
+          flex: 1;
         }
 
-        .voice-circle {
+        .avatar-orb {
           position: relative;
-          width: clamp(240px, 35vw, 360px);
-          height: clamp(240px, 35vw, 360px);
+          width: clamp(240px, 38vw, 360px);
+          aspect-ratio: 1 / 1;
           border-radius: 50%;
           display: grid;
           place-items: center;
-          background: linear-gradient(145deg, rgba(67, 97, 238, 0.35), rgba(63, 55, 201, 0.15));
           overflow: hidden;
+          background: radial-gradient(circle at 30% 30%, rgba(67, 97, 238, 0.45), rgba(59, 130, 246, 0.1));
+          box-shadow: 0 30px 80px rgba(67, 97, 238, 0.25);
         }
 
-        .voice-circle.active .pulse-ring {
-          opacity: 1;
-          transform: scale(1);
-        }
-
-        .pulse-ring {
+        .avatar-orb.speaking::after,
+        .avatar-orb.recording::after {
+          content: '';
           position: absolute;
-          width: 100%;
-          height: 100%;
+          inset: -18%;
           border-radius: 50%;
-          border: 2px solid rgba(67, 97, 238, 0.45);
-          opacity: 0;
-          transform: scale(0.85);
-          transition: transform 0.8s ease, opacity 0.8s ease;
+          border: 2px solid currentColor;
+          opacity: 0.35;
+          animation: breathe 2.8s infinite ease-in-out;
         }
 
-        .voice-circle.active .ring-1 {
-          animation: ripple 2.4s infinite;
+        .avatar-orb.recording {
+          color: var(--error-500);
         }
 
-        .voice-circle.active .ring-2 {
-          animation: ripple 2.4s infinite 0.4s;
+        .avatar-orb.speaking {
+          color: var(--success-500);
         }
 
-        .voice-circle.active .ring-3 {
-          animation: ripple 2.4s infinite 0.8s;
-        }
-
-        .avatar-shell {
-          position: relative;
-          width: clamp(140px, 20vw, 200px);
-          height: clamp(140px, 20vw, 200px);
-          border-radius: 50%;
-          display: grid;
-          place-items: center;
-          background: var(--white);
-          box-shadow: inset 0 0 0 4px rgba(67, 97, 238, 0.15);
-          overflow: hidden;
-        }
-
-        .avatar-shell span {
-          font-size: clamp(48px, 7vw, 72px);
-          font-weight: var(--font-weight-semibold);
+        .avatar-orb:not(.speaking):not(.recording) {
           color: var(--primary-500);
         }
 
-        .avatar-shell img {
+        .orb-backdrop {
+          position: absolute;
+          inset: 8%;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.12);
+          backdrop-filter: blur(8px);
+        }
+
+        .avatar-inner {
+          position: relative;
+          width: 74%;
+          aspect-ratio: 1 / 1;
+          border-radius: 50%;
+          overflow: hidden;
+          background: var(--white);
+          border: 6px solid rgba(255, 255, 255, 0.6);
+          box-shadow: inset 0 4px 16px rgba(15, 23, 42, 0.08);
+          display: grid;
+          place-items: center;
+        }
+
+        .avatar-inner img {
           width: 100%;
           height: 100%;
           object-fit: cover;
         }
 
-        .equalizer {
+        .avatar-inner span {
+          font-size: clamp(64px, 9vw, 96px);
+        }
+
+        .voice-wave {
           position: absolute;
-          bottom: 30px;
+          bottom: 18%;
           display: flex;
           gap: 6px;
+          opacity: 0;
+          transition: opacity var(--transition-fast);
         }
 
-        .equalizer span {
+        .voice-wave.active {
+          opacity: 1;
+        }
+
+        .voice-wave span {
           width: 6px;
-          height: 32px;
+          height: 28px;
           border-radius: 999px;
-          background: rgba(255, 255, 255, 0.8);
-          animation: equalize 1.3s infinite ease-in-out;
+          background: currentColor;
+          animation: wave 1.3s ease-in-out infinite;
         }
 
-        .voice-circle:not(.active) .equalizer span {
-          animation-play-state: paused;
-          opacity: 0.35;
-        }
-
-        .equalizer span:nth-child(2) {
+        .voice-wave span:nth-child(2) {
           animation-delay: 0.2s;
         }
 
-        .equalizer span:nth-child(3) {
+        .voice-wave span:nth-child(3) {
           animation-delay: 0.4s;
         }
 
-        .equalizer span:nth-child(4) {
+        .voice-wave span:nth-child(4) {
           animation-delay: 0.6s;
         }
 
-        .equalizer span:nth-child(5) {
-          animation-delay: 0.8s;
-        }
-
-        .assistant-meta h1 {
+        .identity-block h1 {
           font-size: clamp(28px, 3vw, 40px);
           font-weight: var(--font-weight-semibold);
           color: var(--gray-900);
         }
 
-        .assistant-meta p {
-          color: var(--gray-600);
-          margin-top: var(--space-2);
+        .identity-block p {
+          margin-top: var(--space-1);
+          color: var(--gray-500);
+          font-size: var(--text-base);
         }
 
-        .call-controls {
+        .call-state {
+          max-width: 420px;
           display: flex;
-          gap: var(--space-4);
+          flex-direction: column;
+          gap: var(--space-2);
         }
 
-        .control-btn {
+        .state-title {
+          font-size: var(--text-lg);
+          font-weight: var(--font-weight-semibold);
+          color: var(--gray-900);
+        }
+
+        .state-subtitle {
+          color: var(--gray-600);
+          line-height: 1.6;
+        }
+
+        .call-actions {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-3);
+          width: min(360px, 100%);
+        }
+
+        .call-actions button {
+          width: 100%;
+        }
+
+        .primary-action,
+        .secondary-action,
+        .ghost-action {
+          border-radius: var(--radius-2xl);
+          padding: var(--space-3) var(--space-5);
+          font-size: var(--text-base);
+          font-weight: var(--font-weight-semibold);
           border: none;
-          border-radius: var(--radius-xl);
-          padding: var(--space-3) var(--space-6);
-          font-weight: var(--font-weight-medium);
           cursor: pointer;
-          transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-          background: rgba(67, 97, 238, 0.12);
-          color: var(--primary-600);
+          transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
         }
 
-        .control-btn.muted {
-          background: rgba(15, 23, 42, 0.08);
-          color: var(--gray-800);
-        }
-
-        .control-btn.start {
-          background: var(--success-500);
+        .primary-action {
+          background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
           color: var(--white);
+          box-shadow: 0 16px 30px rgba(67, 97, 238, 0.3);
         }
 
-        .control-btn.stop {
-          background: var(--warning-500);
-          color: var(--white);
+        .primary-action:disabled {
+          opacity: 0.65;
+          cursor: not-allowed;
+          transform: none;
+          box-shadow: none;
         }
 
-        .control-btn.end {
-          background: var(--error-500);
-          color: var(--white);
-        }
-
-        .control-btn:hover {
+        .primary-action:not(:disabled):hover {
           transform: translateY(-1px);
-          box-shadow: var(--shadow-sm);
+          box-shadow: 0 22px 44px rgba(67, 97, 238, 0.35);
+        }
+
+        .secondary-action {
+          background: rgba(248, 113, 113, 0.15);
+          color: var(--error-600);
+        }
+
+        .secondary-action:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 10px 24px rgba(248, 113, 113, 0.25);
+        }
+
+        .ghost-action {
+          background: transparent;
+          color: var(--gray-500);
+          border: 1px dashed rgba(148, 163, 184, 0.4);
+        }
+
+        .ghost-action:hover {
+          color: var(--gray-700);
+          border-color: rgba(148, 163, 184, 0.6);
         }
 
         .transcription-panel {
-          background: rgba(15, 23, 42, 0.9);
-          color: var(--white);
-          border-radius: var(--radius-3xl);
-          padding: var(--space-6);
+          position: relative;
+          background: rgba(15, 23, 42, 0.94);
+          border-radius: var(--radius-4xl);
+          padding: var(--space-7);
           display: flex;
           flex-direction: column;
-          gap: var(--space-5);
-          box-shadow: var(--shadow-xl);
-          position: relative;
+          gap: var(--space-6);
+          color: var(--white);
+          box-shadow: 0 30px 60px rgba(15, 23, 42, 0.45);
           overflow: hidden;
         }
 
@@ -784,32 +892,37 @@ const VoiceCallSession = () => {
           content: '';
           position: absolute;
           inset: 0;
-          background: linear-gradient(160deg, rgba(59, 130, 246, 0.15), transparent 45%);
+          background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.35), transparent 55%);
+          opacity: 0.5;
           pointer-events: none;
         }
 
         .transcription-header {
           position: relative;
+          z-index: 1;
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-2);
         }
 
         .transcription-header h2 {
-          font-size: var(--text-xl);
+          font-size: clamp(20px, 2.2vw, 26px);
           font-weight: var(--font-weight-semibold);
-          margin-bottom: var(--space-2);
         }
 
         .transcription-status {
+          color: rgba(226, 232, 240, 0.7);
           font-size: var(--text-sm);
-          color: rgba(255, 255, 255, 0.7);
         }
 
         .transcription-body {
           position: relative;
+          z-index: 1;
           background: rgba(15, 23, 42, 0.75);
-          border-radius: var(--radius-2xl);
+          border-radius: var(--radius-3xl);
           padding: var(--space-5);
           overflow-y: auto;
-          max-height: 480px;
+          max-height: 520px;
           display: flex;
           flex-direction: column;
           gap: var(--space-4);
@@ -820,7 +933,8 @@ const VoiceCallSession = () => {
           flex-direction: column;
           align-items: center;
           gap: var(--space-3);
-          color: rgba(255, 255, 255, 0.75);
+          color: rgba(226, 232, 240, 0.75);
+          text-align: center;
         }
 
         .transcription-line {
@@ -829,61 +943,81 @@ const VoiceCallSession = () => {
           gap: var(--space-2);
         }
 
-        .transcription-line .speaker {
+        .transcription-line.user-line {
+          align-items: flex-end;
+        }
+
+        .transcription-line.assistant-line,
+        .transcription-line.system-line {
+          align-items: flex-start;
+        }
+
+        .line-meta {
+          display: flex;
+          align-items: center;
+          gap: var(--space-2);
           font-size: var(--text-xs);
           letter-spacing: 0.08em;
           text-transform: uppercase;
-          color: rgba(255, 255, 255, 0.55);
+          color: rgba(226, 232, 240, 0.55);
         }
 
         .transcription-line .text {
-          font-size: var(--text-base);
+          padding: var(--space-3) var(--space-4);
+          border-radius: var(--radius-2xl);
+          background: rgba(226, 232, 240, 0.08);
+          color: rgba(248, 250, 252, 0.92);
+          max-width: 100%;
+          text-align: left;
           line-height: 1.6;
-          color: rgba(255, 255, 255, 0.9);
         }
 
-        .user-line .text {
-          color: rgba(148, 197, 255, 0.92);
+        .transcription-line.user-line .text {
+          background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(37, 99, 235, 0.2));
+          color: var(--white);
         }
 
-        .transcription-line.listening .speaker {
-          color: rgba(148, 197, 255, 0.85);
+        .transcription-line.assistant-line .text {
+          background: rgba(34, 197, 94, 0.18);
+          color: rgba(240, 253, 244, 0.95);
         }
 
-        .listening-indicator {
+        .transcription-line.system-line .text {
+          background: rgba(148, 163, 184, 0.16);
+          color: rgba(226, 232, 240, 0.9);
+          font-style: italic;
+        }
+
+        .timestamp {
+          font-variant-numeric: tabular-nums;
+          color: rgba(226, 232, 240, 0.5);
+        }
+
+        .recording-indicator,
+        .processing-indicator {
           display: inline-flex;
+          align-items: center;
           gap: 6px;
-          align-items: center;
+          padding: var(--space-3) var(--space-4);
+          border-radius: var(--radius-2xl);
+          background: rgba(148, 163, 184, 0.14);
         }
 
-        .listening-indicator span {
-          width: 8px;
-          height: 8px;
-          border-radius: 999px;
-          background: rgba(148, 197, 255, 0.85);
-          animation: bounce 0.9s infinite ease-in-out;
-        }
-
-        .listening-indicator span:nth-child(2) {
-          animation-delay: 0.15s;
-        }
-
-        .listening-indicator span:nth-child(3) {
-          animation-delay: 0.3s;
-        }
-
-        .recording-indicator {
-          display: inline-flex;
-          gap: 4px;
-          align-items: center;
-        }
-
-        .recording-indicator span {
+        .recording-indicator span,
+        .processing-indicator span {
           width: 6px;
           height: 6px;
           border-radius: 999px;
-          background: var(--error-500);
-          animation: pulse-recording 0.8s infinite ease-in-out;
+        }
+
+        .recording-indicator span {
+          background: var(--error-400);
+          animation: pulse-recording 0.9s infinite ease-in-out;
+        }
+
+        .processing-indicator span {
+          background: var(--primary-400);
+          animation: pulse-processing 1.2s infinite ease-in-out;
         }
 
         .recording-indicator span:nth-child(2) {
@@ -898,20 +1032,6 @@ const VoiceCallSession = () => {
           animation-delay: 0.6s;
         }
 
-        .processing-indicator {
-          display: inline-flex;
-          gap: 4px;
-          align-items: center;
-        }
-
-        .processing-indicator span {
-          width: 6px;
-          height: 6px;
-          border-radius: 999px;
-          background: var(--primary-500);
-          animation: pulse-processing 1.2s infinite ease-in-out;
-        }
-
         .processing-indicator span:nth-child(2) {
           animation-delay: 0.3s;
         }
@@ -920,19 +1040,31 @@ const VoiceCallSession = () => {
           animation-delay: 0.6s;
         }
 
-        .system-line .text {
-          color: rgba(255, 255, 255, 0.7);
-          font-style: italic;
+        @keyframes breathe {
+          0%,
+          100% {
+            transform: scale(0.92);
+            opacity: 0.3;
+          }
+          50% {
+            transform: scale(1.05);
+            opacity: 0.6;
+          }
         }
 
-        .timestamp {
-          font-size: var(--text-xs);
-          color: rgba(255, 255, 255, 0.4);
-          margin-left: var(--space-2);
+        @keyframes wave {
+          0%,
+          100% {
+            transform: scaleY(0.4);
+          }
+          50% {
+            transform: scaleY(1);
+          }
         }
 
         @keyframes pulse-recording {
-          0%, 100% {
+          0%,
+          100% {
             transform: scale(0.8);
             opacity: 0.6;
           }
@@ -943,7 +1075,8 @@ const VoiceCallSession = () => {
         }
 
         @keyframes pulse-processing {
-          0%, 100% {
+          0%,
+          100% {
             transform: scale(0.6);
             opacity: 0.4;
           }
@@ -953,96 +1086,45 @@ const VoiceCallSession = () => {
           }
         }
 
-        @keyframes ripple {
-          0% {
-            transform: scale(0.75);
-            opacity: 0.75;
-          }
-          70% {
-            opacity: 0;
-          }
-          100% {
-            transform: scale(1.25);
-            opacity: 0;
-          }
-        }
-
-        @keyframes equalize {
-          0%,
-          100% {
-            transform: scaleY(0.45);
-          }
-          50% {
-            transform: scaleY(1);
-          }
-        }
-
-        @keyframes pulse-soft {
-          0%,
-          100% {
-            transform: scale(0.9);
-            opacity: 0.75;
-          }
-          50% {
-            transform: scale(1);
-            opacity: 1;
-          }
-        }
-
-        @keyframes bounce {
-          0%,
-          100% {
-            transform: translateY(0);
-            opacity: 0.6;
-          }
-          50% {
-            transform: translateY(-4px);
-            opacity: 1;
-          }
-        }
-
         @media (max-width: 1200px) {
-          .call-layout {
+          .call-shell {
             grid-template-columns: 1fr;
           }
 
           .transcription-panel {
             order: -1;
           }
+
+          .experience-header {
+            flex-wrap: wrap;
+            justify-content: center;
+          }
         }
 
         @media (max-width: 768px) {
           .voice-call-page {
-            padding: var(--space-8) 0;
+            padding: var(--space-8) var(--space-4);
           }
 
-          .call-stage {
+          .call-experience {
             padding: var(--space-6);
           }
 
-          .call-header {
+          .experience-header {
             flex-direction: column;
-            align-items: flex-start;
-            gap: var(--space-4);
+            gap: var(--space-3);
           }
 
-          .call-visualizer {
-            gap: var(--space-6);
-          }
-
-          .call-controls {
-            flex-direction: column;
+          .call-actions {
             width: 100%;
           }
 
-          .control-btn {
-            width: 100%;
-            justify-content: center;
+          .transcription-panel {
+            padding: var(--space-6);
           }
         }
       `}</style>
     </div>
   );
-};
 
 export default VoiceCallSession;
