@@ -465,8 +465,11 @@ const ProductionVoiceChat = () => {
       user?.user_metadata?.voicePreference ||
       null;
     const voiceId =
+      (typeof voicePreference === 'string' ? voicePreference : null) ||
       voicePreference?.voice_id ||
       voicePreference?.voiceId ||
+      voicePreference?.params?.voice_id ||
+      voicePreference?.params?.voiceId ||
       null;
 
     const params = new URLSearchParams({

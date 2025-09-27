@@ -287,6 +287,134 @@ const VoiceChat = () => {
           .order('timestamp', { ascending: false })
       ]);
 
+      const personaSettings = matchedUser.persona_settings || {};
+      const profileDetails = profileRecord || null;
+
+      const displayName =
+        [
+          personaSettings.display_name,
+          personaSettings.name,
+          profileDetails?.full_name,
+          profileDetails?.display_name,
+          matchedUser.name
+        ]
+          .map(sanitizeDisplayText)
+          .find(Boolean) ||
+        sanitizeDisplayText(profileDetails?.username) ||
+        sanitizeDisplayText(matchedUser.email?.split('@')[0]) ||
+        'Aura Assistant';
+
+      const resolvedSlug = buildProfileSlug({
+        personaSettings,
+        profile: profileDetails,
+        fallbackName: displayName,
+        fallbackId: matchedUser.user_id
+      });
+
+      let voicePreference = matchedUser.voice_preference || null;
+
+      const normalizeVoicePreference = (preference) => {
+        if (!preference) {
+          return null;
+        }
+
+        if (typeof preference === 'string') {
+          return {
+            voice_id: preference,
+          };
+        }
+
+        if (preference?.voice_id || preference?.voiceId) {
+          return preference;
+        }
+
+        if (preference?.params && typeof preference.params === 'object') {
+          const derivedVoiceId =
+            preference.params.voice_id ||
+            preference.params.voiceId ||
+            null;
+
+          if (derivedVoiceId) {
+            return {
+              ...preference,
+              voice_id: preference.voice_id || derivedVoiceId,
+            };
+          }
+        }
+
+        return preference;
+      };
+
+      if (!voicePreference) {
+        const assistantIds = new Set(
+          [
+            matchedUser.user_id,
+            personaSettings.assistant_id,
+            personaSettings.assistantId,
+          ]
+            .map((value) => (value ? value.toString().trim() : ''))
+            .filter(Boolean)
+        );
+
+        const assistantKeys = new Set(
+          [
+            personaSettings.assistant_key,
+            personaSettings.assistantKey,
+            personaSettings.slug,
+            personaSettings.slug?.toString().trim().toLowerCase(),
+            resolvedSlug,
+          ]
+            .map((value) => (value ? value.toString().trim() : ''))
+            .filter(Boolean)
+        );
+
+        const usernameCandidates = new Set(
+          [
+            profileDetails?.username,
+            profileDetails?.username?.toString().trim().toLowerCase(),
+            slug,
+          ]
+            .map((value) => (value ? value.toString().trim() : ''))
+            .filter(Boolean)
+        );
+
+        slugCandidates.forEach((value) => assistantKeys.add(value));
+        usernameCandidates.forEach((value) => assistantKeys.add(value));
+
+        const orFilters = [];
+        assistantIds.forEach((id) => {
+          orFilters.push(`assistant_id.eq.${id}`);
+        });
+        assistantKeys.forEach((key) => {
+          orFilters.push(`assistant_key.eq.${key}`);
+        });
+
+        if (orFilters.length > 0) {
+          let voicePrefQuery = supabase
+            .from('assistant_voice_prefs')
+            .select('id, tenant_id, assistant_id, assistant_key, provider, voice_id, model, params')
+            .limit(1);
+
+          if (matchedUser.tenant_id) {
+            voicePrefQuery = voicePrefQuery.eq('tenant_id', matchedUser.tenant_id);
+          }
+
+          const { data: voicePrefMatches, error: voicePrefError } = await voicePrefQuery.or(orFilters.join(','));
+
+          if (voicePrefError) {
+            if (isPermissionError(voicePrefError)) {
+              permissionDenied = true;
+            } else {
+              throw voicePrefError;
+            }
+          } else if (voicePrefMatches && voicePrefMatches.length > 0) {
+            voicePreference = voicePrefMatches[0];
+          }
+        }
+      }
+
+      voicePreference = normalizeVoicePreference(voicePreference);
+
       let persona = null;
       if (personaResult.error) {
         if (isPermissionError(personaResult.error)) {
@@ -319,30 +447,6 @@ const VoiceChat = () => {
       } else {
         conversations = conversationsResult.data || [];
       }
-
-      const personaSettings = matchedUser.persona_settings || {};
-      const profileDetails = profileRecord || null;
-
-      const displayName =
-        [
-          personaSettings.display_name,
-          personaSettings.name,
-          profileDetails?.full_name,
-          profileDetails?.display_name,
-          matchedUser.name
-        ]
-          .map(sanitizeDisplayText)
-          .find(Boolean) ||
-        sanitizeDisplayText(profileDetails?.username) ||
-        sanitizeDisplayText(matchedUser.email?.split('@')[0]) ||
-        'Aura Assistant';
-
-      const resolvedSlug = buildProfileSlug({
-        personaSettings,
-        profile: profileDetails,
-        fallbackName: displayName,
-        fallbackId: matchedUser.user_id
-      });
 
       const avatarInitials = displayName
         .split(' ')
@@ -390,7 +494,7 @@ const VoiceChat = () => {
           personaSettings.description?.toString().trim() ||
           profileDetails?.bio?.toString().trim() ||
           generateBio(preferences, persona),
-        voicePreference: matchedUser.voice_preference || null,
+        voicePreference: voicePreference || null,
         preferences,
         persona,
         totalConversations: conversationsCount,
