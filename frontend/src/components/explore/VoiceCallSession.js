@@ -46,6 +46,63 @@ const VoiceCallSession = () => {
     [assistantName]
   );
 
+  const statusDetails = useMemo(() => {
+    if (isAssistantSpeaking) {
+      return {
+        indicator: 'speaking',
+        label: `${assistantFirstName} is speaking`,
+        helper: isConnected
+          ? 'Streaming response securely'
+          : 'Preparing assistant response',
+      };
+    }
+
+    if (isRecording) {
+      return {
+        indicator: 'listening',
+        label: 'Listening to you',
+        helper: 'Capturing microphone input',
+      };
+    }
+
+    if (isProcessing) {
+      return {
+        indicator: 'listening',
+        label: 'Processing your message',
+        helper: 'Awaiting assistant response',
+      };
+    }
+
+    if (connectionError) {
+      return {
+        indicator: 'error',
+        label: 'Connection error',
+        helper: connectionError,
+      };
+    }
+
+    if (isConnected) {
+      return {
+        indicator: 'listening',
+        label: 'Live conversation',
+        helper: 'Secure channel active',
+      };
+    }
+
+    return {
+      indicator: 'disconnected',
+      label: 'Not connected',
+      helper: 'Connect to begin speaking',
+    };
+  }, [
+    assistantFirstName,
+    connectionError,
+    isAssistantSpeaking,
+    isConnected,
+    isProcessing,
+    isRecording,
+  ]);
+
   useEffect(() => {
     if (!profile) {
       return;
@@ -360,33 +417,32 @@ const VoiceCallSession = () => {
       <div className="container">
         <div className="call-layout">
           <div className="call-stage">
-            <div className="call-header">
-              <button
-                type="button"
-                className="back-button"
-                onClick={handleBack}
-                aria-label="Back to assistant profile"
-              >
-                ← Back
-              </button>
-              <div className="call-status">
-                <span
-                  className={`status-indicator ${isAssistantSpeaking ? 'speaking' : isConnected ? 'listening' : 'disconnected'}`}
-                  aria-hidden="true"
-                />
-                <div>
-                  <p className="status-title">
-                    {isAssistantSpeaking ? `${assistantFirstName} is speaking` : 
-                     isConnected ? 'Live conversation' : 
-                     connectionError ? 'Connection error' : 'Not connected'}
-                  </p>
-                  <p className="status-time">{formatDuration(elapsedSeconds)}</p>
+              <div className="call-header">
+                <button
+                  type="button"
+                  className="back-button"
+                  onClick={handleBack}
+                  aria-label="Back to assistant profile"
+                >
+                  ← Back
+                </button>
+                <div className="call-status">
+                  <span
+                    className={`status-indicator ${statusDetails.indicator}`}
+                    aria-hidden="true"
+                  />
+                  <div>
+                    <p className="status-title">{statusDetails.label}</p>
+                    <p className="status-time">{formatDuration(elapsedSeconds)}</p>
+                    {statusDetails.helper && (
+                      <p className="status-helper">{statusDetails.helper}</p>
+                    )}
+                  </div>
                 </div>
+                <button type="button" className="end-call-button" onClick={handleEndCall}>
+                  End Call
+                </button>
               </div>
-              <button type="button" className="end-call-button" onClick={handleEndCall}>
-                End Call
-              </button>
-            </div>
 
             <div className="call-visualizer" role="status" aria-live="polite">
               <div className={`voice-circle ${isAssistantSpeaking ? 'active' : ''}`}>
@@ -424,11 +480,15 @@ const VoiceCallSession = () => {
                     type="button"
                     className="control-btn start"
                     onClick={startVoiceChat}
-                    disabled={isProcessing || connectionError}
+                    disabled={isProcessing}
                   >
-                    {isProcessing ? 'Processing...' : 
-                     connectionError ? 'Connection Error' :
-                     !isConnected ? 'Connect & Start' : 'Start Voice Chat'}
+                    {isProcessing
+                      ? 'Processing...'
+                      : connectionError
+                      ? 'Reconnect'
+                      : !isConnected
+                      ? 'Connect & Start'
+                      : 'Start Voice Chat'}
                   </button>
                 ) : (
                   <button
@@ -442,6 +502,32 @@ const VoiceCallSession = () => {
                 <button type="button" className="control-btn end" onClick={handleEndCall}>
                   End call
                 </button>
+              </div>
+              <div className="call-hints">
+                {connectionError ? (
+                  <>
+                    <p className="hint error-text">{connectionError}</p>
+                    <p className="hint">Tap "Reconnect" to try again.</p>
+                  </>
+                ) : (
+                  <>
+                    {!isConnected && !isProcessing && !isRecording && (
+                      <p className="hint">
+                        Connect with {assistantFirstName} to open a secure voice channel.
+                      </p>
+                    )}
+                    {isRecording && (
+                      <p className="hint">
+                        We&apos;re listening — stop recording when you&apos;re ready for a response.
+                      </p>
+                    )}
+                    {isProcessing && (
+                      <p className="hint">
+                        Processing your audio. {assistantFirstName} will reply momentarily.
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -574,6 +660,12 @@ const VoiceCallSession = () => {
           box-shadow: 0 0 0 6px rgba(67, 97, 238, 0.18);
         }
 
+        .status-indicator.error {
+          background: var(--error-500);
+          box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.18);
+          animation: none;
+        }
+
         .status-indicator.disconnected {
           background: var(--gray-400);
           box-shadow: 0 0 0 6px rgba(156, 163, 175, 0.18);
@@ -589,6 +681,12 @@ const VoiceCallSession = () => {
         .status-time {
           color: var(--gray-600);
           font-size: var(--text-sm);
+        }
+
+        .status-helper {
+          font-size: var(--text-xs);
+          color: var(--gray-500);
+          margin-top: 2px;
         }
 
         .end-call-button {
@@ -729,6 +827,8 @@ const VoiceCallSession = () => {
         .call-controls {
           display: flex;
           gap: var(--space-4);
+          align-items: center;
+          flex-wrap: wrap;
         }
 
         .control-btn {
@@ -740,6 +840,12 @@ const VoiceCallSession = () => {
           transition: transform var(--transition-fast), box-shadow var(--transition-fast);
           background: rgba(67, 97, 238, 0.12);
           color: var(--primary-600);
+        }
+
+        .control-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+          box-shadow: none;
         }
 
         .control-btn.muted {
@@ -765,6 +871,25 @@ const VoiceCallSession = () => {
         .control-btn:hover {
           transform: translateY(-1px);
           box-shadow: var(--shadow-sm);
+        }
+
+        .call-hints {
+          text-align: center;
+          margin-top: var(--space-4);
+          margin-inline: auto;
+          max-width: 420px;
+          color: var(--gray-600);
+        }
+
+        .call-hints .hint {
+          font-size: var(--text-sm);
+          line-height: 1.5;
+          margin-bottom: var(--space-2);
+        }
+
+        .call-hints .error-text {
+          color: var(--error-500);
+          font-weight: var(--font-weight-medium);
         }
 
         .transcription-panel {
