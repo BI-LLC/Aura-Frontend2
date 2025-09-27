@@ -71,7 +71,7 @@ const VoiceCallSession = () => {
     try {
       // Ensure token is properly formatted
       const token = rawToken.startsWith('Bearer ') ? rawToken.slice(7) : rawToken;
-      const wsUrl = `ws://157.245.192.221:8000/ws/voice/continuous?token=${encodeURIComponent(token)}`;
+      const wsUrl = `wss://api.iaura.ai/ws/voice/continuous?token=${encodeURIComponent(token)}`;
       console.log('Connecting to WebSocket:', wsUrl);
       console.log('User token:', token ? 'Present' : 'Missing');
       const ws = new WebSocket(wsUrl);

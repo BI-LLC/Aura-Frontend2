@@ -57,7 +57,7 @@ const ProductionVoiceChat = () => {
   const checkBackendConnection = async () => {
     try {
       // REQUIRED: Primary health check endpoint
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://157.245.192.221:8000'}/health`);
+      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/health`);
       if (response.ok) {
         const data = await response.json();
         setIsConnected(data.status === 'healthy');
@@ -69,7 +69,7 @@ const ProductionVoiceChat = () => {
       
       // REQUIRED: Fallback endpoint for voice service health
       try {
-        const altResponse = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://157.245.192.221:8000'}/voice/status`);
+        const altResponse = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/voice/status`);
         if (altResponse.ok) {
           const altData = await altResponse.json();
           setIsConnected(altData.status === 'operational');
@@ -410,7 +410,7 @@ const ProductionVoiceChat = () => {
     formData.append('audio', audioBlob, filename);
     formData.append('language', 'en');
     
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://157.245.192.221:8000'}/voice/transcribe`, {
+    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/voice/transcribe`, {
       method: 'POST',
       body: formData,
       headers: {
@@ -429,7 +429,7 @@ const ProductionVoiceChat = () => {
   };
 
   const getAIResponse = async (message) => {
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://157.245.192.221:8000'}/chat`, {
+    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/chat/message`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -458,7 +458,7 @@ const ProductionVoiceChat = () => {
     // ⚠️ CRITICAL FIX: DO NOT MODIFY REQUEST FORMAT ⚠️
     // Backend expects URL-encoded format, NOT JSON - changing this causes 422 errors
     // See VOICE_FIXES_DOCUMENTATION.md for detailed explanation
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://157.245.192.221:8000'}/voice/synthesize`, {
+    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/voice/synthesize`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded', // REQUIRED: URL-encoded format

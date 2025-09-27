@@ -4,7 +4,7 @@
 import axios from 'axios';
 
 // API Configuration
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://157.245.192.221:8000';
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai';
 const TOKEN_KEY = process.env.REACT_APP_TOKEN_STORAGE_KEY || 'aura_auth_token';
 
 // Create axios instance with default configuration

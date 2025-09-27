@@ -572,7 +572,7 @@ const VoiceChat = () => {
 
     try {
       // Call the backend API to get AI response
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://157.245.192.221:8000'}/chat`, {
+      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

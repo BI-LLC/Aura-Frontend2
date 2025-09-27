@@ -126,7 +126,7 @@ const SimpleVoiceChat = () => {
     formData.append('audio', audioBlob, 'audio.wav');
     formData.append('language', 'en');
     
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://157.245.192.221:8000'}/voice/transcribe`, {
+    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/voice/transcribe`, {
       method: 'POST',
       body: formData
     });
@@ -145,7 +145,7 @@ const SimpleVoiceChat = () => {
       throw new Error('Authentication required');
     }
     
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://157.245.192.221:8000'}/chat`, {
+    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -169,7 +169,7 @@ const SimpleVoiceChat = () => {
   };
 
   const synthesizeSpeech = async (text) => {
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'http://157.245.192.221:8000'}/voice/synthesize`, {
+    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/voice/synthesize`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'

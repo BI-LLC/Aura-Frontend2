@@ -46,7 +46,7 @@
       "last 1 safari version"
     ]
   },
-  "proxy": "http://157.245.192.221:8000",
+  "proxy": "https://api.iaura.ai",
   "engines": {
     "node": ">=16.0.0",
     "npm": ">=8.0.0"
