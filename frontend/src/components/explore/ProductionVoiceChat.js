@@ -454,21 +454,38 @@ const ProductionVoiceChat = () => {
 
   const synthesizeSpeech = async (text) => {
     console.log('🔊 Synthesizing speech for:', text.substring(0, 100) + '...');
-    
+
     // ⚠️ CRITICAL FIX: DO NOT MODIFY REQUEST FORMAT ⚠️
     // Backend expects URL-encoded format, NOT JSON - changing this causes 422 errors
     // See VOICE_FIXES_DOCUMENTATION.md for detailed explanation
+    const voicePreference =
+      user?.voice_preference ||
+      user?.voicePreference ||
+      user?.user_metadata?.voice_preference ||
+      user?.user_metadata?.voicePreference ||
+      null;
+    const voiceId =
+      voicePreference?.voice_id ||
+      voicePreference?.voiceId ||
+      null;
+
+    const params = new URLSearchParams({
+      text: text.substring(0, 500), // REQUIRED: Text length limit
+      stability: '0.5',
+      similarity_boost: '0.75'
+    });
+
+    if (voiceId) {
+      params.append('voice_id', voiceId);
+    }
+
     const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/voice/synthesize`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded', // REQUIRED: URL-encoded format
         'Authorization': `Bearer ${getToken()}`
       },
-      body: new URLSearchParams({
-        text: text.substring(0, 500), // REQUIRED: Text length limit
-        stability: '0.5',
-        similarity_boost: '0.75'
-      })
+      body: params
     });
     
     if (!response.ok) {

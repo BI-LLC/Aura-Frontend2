@@ -390,6 +390,7 @@ const VoiceChat = () => {
           personaSettings.description?.toString().trim() ||
           profileDetails?.bio?.toString().trim() ||
           generateBio(preferences, persona),
+        voicePreference: matchedUser.voice_preference || null,
         preferences,
         persona,
         totalConversations: conversationsCount,
