@@ -25,7 +25,7 @@ const VoiceCallSession = () => {
   const navigationProfile = location.state?.profile || null;
 
   const [profile] = useState(navigationProfile);
-  // const [isMuted, setIsMuted] = useState(false); // Currently unused
+  const [isMuted, setIsMuted] = useState(false);
   const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -37,8 +37,9 @@ const VoiceCallSession = () => {
   const transcriptRef = useRef(null);
   const websocketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const { user, getToken, isAuthenticated } = useAuth();
+  const mediaStreamRef = useRef(null);
+  const initializationRef = useRef(false);
+  const { getToken, isAuthenticated } = useAuth();
 
   const assistantName = profile?.name || 'Aura Assistant';
   const assistantFirstName = useMemo(
@@ -47,13 +48,27 @@ const VoiceCallSession = () => {
   );
 
   const statusDetails = useMemo(() => {
+    if (connectionError) {
+      return {
+        indicator: 'error',
+        label: 'Connection issue',
+        helper: connectionError,
+      };
+    }
+
     if (isAssistantSpeaking) {
       return {
         indicator: 'speaking',
         label: `${assistantFirstName} is speaking`,
-        helper: isConnected
-          ? 'Streaming response securely'
-          : 'Preparing assistant response',
+        helper: 'Streaming response securely',
+      };
+    }
+
+    if (isMuted) {
+      return {
+        indicator: 'muted',
+        label: 'Microphone muted',
+        helper: 'Tap to unmute and continue talking',
       };
     }
 
@@ -61,23 +76,15 @@ const VoiceCallSession = () => {
       return {
         indicator: 'listening',
         label: 'Listening to you',
-        helper: 'Capturing microphone input',
+        helper: 'Microphone is live',
       };
     }
 
     if (isProcessing) {
       return {
         indicator: 'listening',
-        label: 'Processing your message',
-        helper: 'Awaiting assistant response',
-      };
-    }
-
-    if (connectionError) {
-      return {
-        indicator: 'error',
-        label: 'Connection error',
-        helper: connectionError,
+        label: 'Connecting…',
+        helper: 'Initializing secure voice channel',
       };
     }
 
@@ -91,14 +98,15 @@ const VoiceCallSession = () => {
 
     return {
       indicator: 'disconnected',
-      label: 'Not connected',
-      helper: 'Connect to begin speaking',
+      label: 'Preparing call',
+      helper: 'Connecting to the assistant',
     };
   }, [
     assistantFirstName,
     connectionError,
     isAssistantSpeaking,
     isConnected,
+    isMuted,
     isProcessing,
     isRecording,
   ]);
@@ -117,12 +125,45 @@ const VoiceCallSession = () => {
     return () => clearInterval(timer);
   }, [profile]);
 
+  useEffect(() => {
+    if (!profile || initializationRef.current) {
+      return;
+    }
+
+    if (!isAuthenticated) {
+      setConnectionError('You need to be logged in to start a voice call.');
+      return;
+    }
+
+    initializationRef.current = true;
+    startVoiceChat();
+  }, [isAuthenticated, profile]);
+
   // Simple WebSocket connection for voice conversation
   const connectWebSocket = async () => {
-    const rawToken = getToken && typeof getToken === 'function' ? getToken() : null;
+    const resolveToken = async () => {
+      if (getToken && typeof getToken === 'function') {
+        try {
+          const possiblePromise = getToken();
+          return possiblePromise instanceof Promise
+            ? await possiblePromise
+            : possiblePromise;
+        } catch (tokenError) {
+          console.error('Token retrieval error:', tokenError);
+          return null;
+        }
+      }
+      return null;
+    };
+
+    const rawToken = await resolveToken();
     if (!rawToken) {
       setConnectionError('Authentication required. Please log in.');
       return false;
+    }
+
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      return true;
     }
 
     try {
@@ -132,56 +173,83 @@ const VoiceCallSession = () => {
       console.log('Connecting to WebSocket:', wsUrl);
       console.log('User token:', token ? 'Present' : 'Missing');
       const ws = new WebSocket(wsUrl);
-      
+
       websocketRef.current = ws;
 
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-        setIsConnected(true);
-        setConnectionError(null);
-        setTranscript(prev => [...prev, {
-          speaker: 'System',
-          text: 'Connected to AI assistant. You can start speaking.',
-          timestamp: new Date()
-        }]);
-      };
+      return await new Promise((resolve) => {
+        let hasResolved = false;
+        const finalize = (value) => {
+          if (!hasResolved) {
+            hasResolved = true;
+            resolve(value);
+          }
+        };
 
-      ws.onmessage = async (event) => {
+        ws.onopen = () => {
+          console.log('WebSocket connected');
+          setIsConnected(true);
+          setConnectionError(null);
+          setTranscript((prev) => [
+            ...prev,
+            {
+              speaker: 'System',
+              text: 'Connected to AI assistant. You can start speaking.',
+              timestamp: new Date(),
+            },
+          ]);
+          finalize(true);
+        };
+
+        ws.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
           console.log('WebSocket message:', data.type);
 
           switch (data.type) {
             case 'user_transcript':
-              setTranscript(prev => [...prev, {
-                speaker: 'You',
-                text: data.text,
-                timestamp: new Date()
-              }]);
+              setTranscript((prev) => [
+                ...prev,
+                {
+                  speaker: 'You',
+                  text: data.text,
+                  timestamp: new Date(),
+                },
+              ]);
               break;
 
             case 'ai_audio':
               if (data.audio) {
+                let audioUrl;
                 try {
-                  const audioBlob = new Blob([Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))], { type: 'audio/mpeg' });
-                  const audioUrl = URL.createObjectURL(audioBlob);
+                  const audioBlob = new Blob(
+                    [Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0))],
+                    { type: 'audio/mpeg' }
+                  );
+                  audioUrl = URL.createObjectURL(audioBlob);
                   const audio = new Audio(audioUrl);
-                  
+
                   setIsAssistantSpeaking(true);
                   await audio.play();
-                  
-                  setTranscript(prev => [...prev, {
-                    speaker: assistantName,
-                    text: data.text || 'AI responded',
-                    timestamp: new Date()
-                  }]);
-                  
+
+                  setTranscript((prev) => [
+                    ...prev,
+                    {
+                      speaker: assistantName,
+                      text: data.text || 'AI responded',
+                      timestamp: new Date(),
+                    },
+                  ]);
+
                   audio.onended = () => {
                     setIsAssistantSpeaking(false);
                     URL.revokeObjectURL(audioUrl);
                   };
                 } catch (audioError) {
                   console.error('Audio playback error:', audioError);
+                  setIsAssistantSpeaking(false);
+                  if (audioUrl) {
+                    URL.revokeObjectURL(audioUrl);
+                  }
                 }
               }
               break;
@@ -189,19 +257,25 @@ const VoiceCallSession = () => {
             case 'error':
               console.error('WebSocket error:', data.message);
               setConnectionError(data.message);
-              setTranscript(prev => [...prev, {
-                speaker: 'System',
-                text: `Error: ${data.message}`,
-                timestamp: new Date()
-              }]);
-              
+              setTranscript((prev) => [
+                ...prev,
+                {
+                  speaker: 'System',
+                  text: `Error: ${data.message}`,
+                  timestamp: new Date(),
+                },
+              ]);
+
               // Handle authentication errors specifically
               if (data.message.includes('token') || data.message.includes('auth')) {
-                setTranscript(prev => [...prev, {
-                  speaker: 'System',
-                  text: 'Authentication failed. Please log out and log back in.',
-                  timestamp: new Date()
-                }]);
+                setTranscript((prev) => [
+                  ...prev,
+                  {
+                    speaker: 'System',
+                    text: 'Authentication failed. Please log out and log back in.',
+                    timestamp: new Date(),
+                  },
+                ]);
               }
               break;
 
@@ -213,22 +287,25 @@ const VoiceCallSession = () => {
         }
       };
 
-      ws.onclose = (event) => {
-        console.log('WebSocket closed:', event.code);
-        setIsConnected(false);
-        setIsRecording(false);
-        if (event.code !== 1000) {
-          setConnectionError('Connection lost');
-        }
-      };
+        ws.onclose = (event) => {
+          console.log('WebSocket closed:', event.code);
+          setIsConnected(false);
+          setIsRecording(false);
+          setIsAssistantSpeaking(false);
+          stopVoiceChat();
+          if (event.code !== 1000) {
+            setConnectionError('Connection lost');
+          }
+          finalize(hasResolved ? true : false);
+        };
 
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setConnectionError('Connection failed');
-        setIsConnected(false);
-      };
-
-      return true;
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          setConnectionError('Connection failed');
+          setIsConnected(false);
+          finalize(false);
+        };
+      });
     } catch (error) {
       console.error('WebSocket connection error:', error);
       setConnectionError('Failed to connect');
@@ -241,28 +318,45 @@ const VoiceCallSession = () => {
     if (!profile || isRecording || isProcessing) return;
 
     try {
+      setIsProcessing(true);
+      setConnectionError(null);
+
       // First, connect to WebSocket if not already connected
       if (!isConnected) {
         const connected = await connectWebSocket();
-        if (!connected) return;
+        if (!connected) {
+          setIsProcessing(false);
+          return;
+        }
+      }
+
+      if (
+        typeof navigator === 'undefined' ||
+        !navigator.mediaDevices ||
+        !navigator.mediaDevices.getUserMedia
+      ) {
+        setConnectionError('Microphone not available in this environment.');
+        setIsProcessing(false);
+        return;
       }
 
       // Get microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
-        } 
+          autoGainControl: true,
+        },
       });
+
+      mediaStreamRef.current = stream;
 
       // Create MediaRecorder for continuous audio streaming
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
+        mimeType: 'audio/webm;codecs=opus',
       });
 
       mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0 && websocketRef.current?.readyState === WebSocket.OPEN) {
@@ -270,55 +364,99 @@ const VoiceCallSession = () => {
           const reader = new FileReader();
           reader.onload = () => {
             const base64 = reader.result.split(',')[1];
-            websocketRef.current.send(JSON.stringify({
-              type: 'audio_chunk',
-              audio: base64
-            }));
+            websocketRef.current.send(
+              JSON.stringify({
+                type: 'audio_chunk',
+                audio: base64,
+              })
+            );
           };
           reader.readAsDataURL(event.data);
         }
       };
 
       mediaRecorder.onstop = () => {
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach((track) => track.stop());
       };
 
       // Start recording with small chunks for real-time streaming
       mediaRecorder.start(250); // Send data every 250ms
       setIsRecording(true);
       setIsProcessing(false);
-      
-      // Add user message to transcript
-      setTranscript(prev => [...prev, {
-        speaker: 'You',
-        text: '🎤 Recording...',
-        timestamp: new Date()
-      }]);
+      setIsMuted(false);
 
       console.log('Continuous voice conversation started');
-
     } catch (error) {
       console.error('Error starting voice chat:', error);
       setIsRecording(false);
       setIsProcessing(false);
-      setTranscript(prev => [...prev, {
-        speaker: 'System',
-        text: 'Failed to start voice recording. Please check your microphone permissions.',
-        timestamp: new Date()
-      }]);
+      setConnectionError(
+        'Failed to start voice recording. Please check your microphone permissions.'
+      );
+      setTranscript((prev) => [
+        ...prev,
+        {
+          speaker: 'System',
+          text: 'Failed to start voice recording. Please check your microphone permissions.',
+          timestamp: new Date(),
+        },
+      ]);
     }
   };
 
-  const stopVoiceChat = async () => {
-    if (!isRecording) return;
-    
-    // Stop media recorder
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
+  const stopVoiceChat = () => {
+    if (mediaRecorderRef.current) {
+      try {
+        if (mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+        }
+      } catch (recorderError) {
+        console.error('Error stopping media recorder:', recorderError);
+      }
+      mediaRecorderRef.current = null;
     }
-    
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+
     setIsRecording(false);
-    setIsProcessing(true);
+    setIsMuted(false);
+  };
+
+  const toggleMute = () => {
+    if (!mediaRecorderRef.current || !isRecording) {
+      return;
+    }
+
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+
+    try {
+      if (mediaRecorderRef.current.state === 'recording' && nextMuted && mediaRecorderRef.current.pause) {
+        mediaRecorderRef.current.pause();
+      } else if (mediaRecorderRef.current.state === 'paused' && !nextMuted && mediaRecorderRef.current.resume) {
+        mediaRecorderRef.current.resume();
+      }
+    } catch (recorderError) {
+      console.error('MediaRecorder mute toggle error:', recorderError);
+    }
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getAudioTracks().forEach((track) => {
+        track.enabled = !nextMuted;
+      });
+    }
+
+    if (websocketRef.current?.readyState === WebSocket.OPEN) {
+      websocketRef.current.send(
+        JSON.stringify({
+          type: 'microphone_status',
+          muted: nextMuted,
+        })
+      );
+    }
   };
 
   // Cleanup WebSocket connection
@@ -329,15 +467,14 @@ const VoiceCallSession = () => {
     }
     setIsConnected(false);
     setIsRecording(false);
+    setIsAssistantSpeaking(false);
   };
 
   // Cleanup on component unmount
   useEffect(() => {
     return () => {
+      stopVoiceChat();
       disconnectWebSocket();
-      if (mediaRecorderRef.current) {
-        mediaRecorderRef.current.stop();
-      }
     };
   }, []);
 
@@ -349,8 +486,9 @@ const VoiceCallSession = () => {
 
   const handleEndCall = () => {
     // Disconnect WebSocket and clean up
+    stopVoiceChat();
     disconnectWebSocket();
-    
+
     const fallbackSlug = profile?.slug || slug;
     navigate(`/chat/${fallbackSlug}`);
   };
@@ -417,32 +555,32 @@ const VoiceCallSession = () => {
       <div className="container">
         <div className="call-layout">
           <div className="call-stage">
-              <div className="call-header">
-                <button
-                  type="button"
-                  className="back-button"
-                  onClick={handleBack}
-                  aria-label="Back to assistant profile"
-                >
-                  ← Back
-                </button>
-                <div className="call-status">
-                  <span
-                    className={`status-indicator ${statusDetails.indicator}`}
-                    aria-hidden="true"
-                  />
-                  <div>
-                    <p className="status-title">{statusDetails.label}</p>
-                    <p className="status-time">{formatDuration(elapsedSeconds)}</p>
-                    {statusDetails.helper && (
-                      <p className="status-helper">{statusDetails.helper}</p>
-                    )}
-                  </div>
+            <div className="call-header">
+              <button
+                type="button"
+                className="back-button"
+                onClick={handleBack}
+                aria-label="Back to assistant profile"
+              >
+                ← Back
+              </button>
+              <div className="call-status">
+                <span
+                  className={`status-indicator ${statusDetails.indicator}`}
+                  aria-hidden="true"
+                />
+                <div>
+                  <p className="status-title">{statusDetails.label}</p>
+                  <p className="status-time">{formatDuration(elapsedSeconds)}</p>
+                  {statusDetails.helper && (
+                    <p className="status-helper">{statusDetails.helper}</p>
+                  )}
                 </div>
-                <button type="button" className="end-call-button" onClick={handleEndCall}>
-                  End Call
-                </button>
               </div>
+              <button type="button" className="end-call-button" onClick={handleEndCall}>
+                End Call
+              </button>
+            </div>
 
             <div className="call-visualizer" role="status" aria-live="polite">
               <div className={`voice-circle ${isAssistantSpeaking ? 'active' : ''}`}>
@@ -475,60 +613,34 @@ const VoiceCallSession = () => {
               </div>
 
               <div className="call-controls">
-                {!isRecording ? (
-                  <button
-                    type="button"
-                    className="control-btn start"
-                    onClick={startVoiceChat}
-                    disabled={isProcessing}
-                  >
-                    {isProcessing
-                      ? 'Processing...'
-                      : connectionError
-                      ? 'Reconnect'
-                      : !isConnected
-                      ? 'Connect & Start'
-                      : 'Start Voice Chat'}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="control-btn stop"
-                    onClick={stopVoiceChat}
-                  >
-                    Stop Recording
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className={`control-btn ${isMuted ? 'muted' : ''}`}
+                  onClick={toggleMute}
+                  disabled={!isRecording || Boolean(connectionError)}
+                >
+                  {isMuted ? 'Unmute microphone' : 'Mute microphone'}
+                </button>
                 <button type="button" className="control-btn end" onClick={handleEndCall}>
                   End call
                 </button>
               </div>
-              <div className="call-hints">
-                {connectionError ? (
-                  <>
-                    <p className="hint error-text">{connectionError}</p>
-                    <p className="hint">Tap "Reconnect" to try again.</p>
-                  </>
-                ) : (
-                  <>
-                    {!isConnected && !isProcessing && !isRecording && (
-                      <p className="hint">
-                        Connect with {assistantFirstName} to open a secure voice channel.
-                      </p>
-                    )}
-                    {isRecording && (
-                      <p className="hint">
-                        We&apos;re listening — stop recording when you&apos;re ready for a response.
-                      </p>
-                    )}
-                    {isProcessing && (
-                      <p className="hint">
-                        Processing your audio. {assistantFirstName} will reply momentarily.
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
+
+              {connectionError && (
+                <div className="call-alert">
+                  <p>{connectionError}</p>
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={() => {
+                      setConnectionError(null);
+                      startVoiceChat();
+                    }}
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -542,7 +654,7 @@ const VoiceCallSession = () => {
               {transcript.length === 0 && (
                 <div className="transcription-placeholder">
                   <LoadingSpinner size="small" />
-                  <p>Ready for voice conversation. Click "Start Voice Chat" to begin.</p>
+                  <p>Initializing secure voice channel…</p>
                 </div>
               )}
 
@@ -550,36 +662,22 @@ const VoiceCallSession = () => {
                 <div
                   key={`${line.speaker}-${index}`}
                   className={`transcription-line ${
-                    line.speaker === 'You' ? 'user-line' : 
-                    line.speaker === assistantName ? 'assistant-line' : 'system-line'
+                    line.speaker === 'You'
+                      ? 'user-line'
+                      : line.speaker === assistantName
+                      ? 'assistant-line'
+                      : 'system-line'
                   }`}
                 >
                   <span className="speaker">{line.speaker}</span>
                   <span className="text">{line.text}</span>
-                  {line.timestamp && (
-                    <span className="timestamp">
-                      {line.timestamp.toLocaleTimeString()}
-                    </span>
-                  )}
                 </div>
               ))}
 
-              {isRecording && (
-                <div className="transcription-line user-line recording">
-                  <span className="speaker">You</span>
-                  <span className="recording-indicator">
-                    <span />
-                    <span />
-                    <span />
-                    <span />
-                  </span>
-                </div>
-              )}
-
-              {isProcessing && (
-                <div className="transcription-line assistant-line processing">
+              {isAssistantSpeaking && (
+                <div className="transcription-line assistant-line listening">
                   <span className="speaker">{assistantName}</span>
-                  <span className="processing-indicator">
+                  <span className="listening-indicator">
                     <span />
                     <span />
                     <span />
@@ -650,14 +748,24 @@ const VoiceCallSession = () => {
           width: 14px;
           height: 14px;
           border-radius: 50%;
-          box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.2);
-          background: var(--success-500);
+          background: var(--primary-500);
+          box-shadow: 0 0 0 6px rgba(67, 97, 238, 0.18);
           animation: pulse-soft 1.6s infinite ease-in-out;
+        }
+
+        .status-indicator.speaking {
+          background: var(--success-500);
+          box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.2);
         }
 
         .status-indicator.listening {
           background: var(--primary-500);
-          box-shadow: 0 0 0 6px rgba(67, 97, 238, 0.18);
+        }
+
+        .status-indicator.muted {
+          background: var(--warning-500);
+          box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.18);
+          animation: none;
         }
 
         .status-indicator.error {
@@ -853,16 +961,6 @@ const VoiceCallSession = () => {
           color: var(--gray-800);
         }
 
-        .control-btn.start {
-          background: var(--success-500);
-          color: var(--white);
-        }
-
-        .control-btn.stop {
-          background: var(--warning-500);
-          color: var(--white);
-        }
-
         .control-btn.end {
           background: var(--error-500);
           color: var(--white);
@@ -873,23 +971,37 @@ const VoiceCallSession = () => {
           box-shadow: var(--shadow-sm);
         }
 
-        .call-hints {
-          text-align: center;
+        .call-alert {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-2);
+          background: rgba(239, 68, 68, 0.08);
+          border-radius: var(--radius-xl);
+          padding: var(--space-4);
           margin-top: var(--space-4);
-          margin-inline: auto;
+          color: var(--error-600);
+          text-align: center;
           max-width: 420px;
-          color: var(--gray-600);
         }
 
-        .call-hints .hint {
-          font-size: var(--text-sm);
-          line-height: 1.5;
-          margin-bottom: var(--space-2);
-        }
-
-        .call-hints .error-text {
-          color: var(--error-500);
+        .call-alert button {
+          align-self: center;
+          border: none;
+          background: var(--error-500);
+          color: var(--white);
+          border-radius: var(--radius-lg);
+          padding: var(--space-2) var(--space-4);
           font-weight: var(--font-weight-medium);
+          cursor: pointer;
+        }
+
+        .call-alert button:hover {
+          opacity: 0.9;
+        }
+
+        .call-alert button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
         }
 
         .transcription-panel {
@@ -997,85 +1109,9 @@ const VoiceCallSession = () => {
           animation-delay: 0.3s;
         }
 
-        .recording-indicator {
-          display: inline-flex;
-          gap: 4px;
-          align-items: center;
-        }
-
-        .recording-indicator span {
-          width: 6px;
-          height: 6px;
-          border-radius: 999px;
-          background: var(--error-500);
-          animation: pulse-recording 0.8s infinite ease-in-out;
-        }
-
-        .recording-indicator span:nth-child(2) {
-          animation-delay: 0.2s;
-        }
-
-        .recording-indicator span:nth-child(3) {
-          animation-delay: 0.4s;
-        }
-
-        .recording-indicator span:nth-child(4) {
-          animation-delay: 0.6s;
-        }
-
-        .processing-indicator {
-          display: inline-flex;
-          gap: 4px;
-          align-items: center;
-        }
-
-        .processing-indicator span {
-          width: 6px;
-          height: 6px;
-          border-radius: 999px;
-          background: var(--primary-500);
-          animation: pulse-processing 1.2s infinite ease-in-out;
-        }
-
-        .processing-indicator span:nth-child(2) {
-          animation-delay: 0.3s;
-        }
-
-        .processing-indicator span:nth-child(3) {
-          animation-delay: 0.6s;
-        }
-
         .system-line .text {
           color: rgba(255, 255, 255, 0.7);
           font-style: italic;
-        }
-
-        .timestamp {
-          font-size: var(--text-xs);
-          color: rgba(255, 255, 255, 0.4);
-          margin-left: var(--space-2);
-        }
-
-        @keyframes pulse-recording {
-          0%, 100% {
-            transform: scale(0.8);
-            opacity: 0.6;
-          }
-          50% {
-            transform: scale(1.2);
-            opacity: 1;
-          }
-        }
-
-        @keyframes pulse-processing {
-          0%, 100% {
-            transform: scale(0.6);
-            opacity: 0.4;
-          }
-          50% {
-            transform: scale(1);
-            opacity: 0.8;
-          }
         }
 
         @keyframes ripple {
