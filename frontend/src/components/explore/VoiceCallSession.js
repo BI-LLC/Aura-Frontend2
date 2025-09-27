@@ -1570,7 +1570,7 @@ const VoiceCallSession = () => {
           }
         }
       `}</style>
-
+    </div>
   );
 };
 
