@@ -239,11 +239,37 @@ const VoiceCallSession = () => {
         voicePreference?.params?.voiceId ||
         null;
 
+      const assistantKeyCandidates = [
+        profile?.persona?.assistant_key,
+        profile?.persona?.assistantKey,
+        profile?.persona?.slug,
+        profile?.slug,
+        slug,
+      ]
+        .map((value) => (value ? value.toString().trim() : ''))
+        .filter(Boolean);
+      const assistantKey = assistantKeyCandidates[0] || '';
+
+      const tenantIdRaw =
+        profile?.tenantId ||
+        profile?.tenant_id ||
+        profile?.tenant?.id ||
+        '';
+      const tenantId = tenantIdRaw ? tenantIdRaw.toString().trim() : '';
+
       const params = new URLSearchParams({
         text: text.substring(0, 500),
         stability: '0.5',
         similarity_boost: '0.75',
       });
+
+      if (assistantKey) {
+        params.append('assistant_key', assistantKey);
+      }
+
+      if (tenantId) {
+        params.append('tenant_id', tenantId);
+      }
 
       if (voiceId) {
         params.append('voice_id', voiceId);
@@ -291,7 +317,7 @@ const VoiceCallSession = () => {
 
       return null;
     },
-    [getToken, profile]
+    [getToken, profile, slug]
   );
 
   const playAssistantAudio = useCallback(

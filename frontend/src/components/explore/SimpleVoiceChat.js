@@ -183,11 +183,38 @@ const SimpleVoiceChat = () => {
       voicePreference?.params?.voiceId ||
       null;
 
+    const assistantKeyCandidates = [
+      user?.user_metadata?.assistant_key,
+      user?.user_metadata?.assistantKey,
+      user?.user_metadata?.slug,
+      user?.user_metadata?.profile_slug,
+      user?.user_metadata?.persona_slug,
+      user?.user_metadata?.username,
+    ]
+      .map((value) => (value ? value.toString().trim() : ''))
+      .filter(Boolean);
+    const assistantKey = assistantKeyCandidates[0] || '';
+
+    const tenantIdRaw =
+      user?.user_metadata?.tenant_id ||
+      user?.app_metadata?.tenant_id ||
+      user?.tenant_id ||
+      '';
+    const tenantId = tenantIdRaw ? tenantIdRaw.toString().trim() : '';
+
     const params = new URLSearchParams({
       text: text.substring(0, 500), // Limit text length
       stability: '0.5',
       similarity_boost: '0.75'
     });
+
+    if (assistantKey) {
+      params.append('assistant_key', assistantKey);
+    }
+
+    if (tenantId) {
+      params.append('tenant_id', tenantId);
+    }
 
     if (voiceId) {
       params.append('voice_id', voiceId);
