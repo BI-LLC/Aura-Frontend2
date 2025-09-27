@@ -189,6 +189,71 @@ const VoiceChat = () => {
         }
       }
 
+      let assistantVoicePrefs = null;
+      const assistantKeyCandidates = new Set([
+        personaSettings.assistant_key,
+        personaSettings.assistantKey,
+        personaSettings.slug,
+        profileDetails?.username,
+        matchedUser.user_id,
+        resolvedSlug,
+        slug,
+      ].filter(Boolean));
+      
+      if (assistantKeyCandidates.size > 0) {
+        let voicePrefQuery = supabase
+          .from('assistant_voice_prefs')
+          .select('id, tenant_id, assistant_key, provider, voice_id, model, params, created_at, updated_at')
+          .order('updated_at', { ascending: false })
+          .limit(1);
+      
+        if (matchedUser.tenant_id) {
+          voicePrefQuery = voicePrefQuery.eq('tenant_id', matchedUser.tenant_id);
+        }
+      
+        const { data: voicePrefMatches, error: voicePrefError } = await voicePrefQuery.in(
+          'assistant_key',
+          Array.from(assistantKeyCandidates)
+        );
+      
+        if (voicePrefError) {
+          console.warn('Voice preferences fetch error:', voicePrefError);
+        } else if (voicePrefMatches && voicePrefMatches.length > 0) {
+          assistantVoicePrefs = voicePrefMatches[0];
+          console.log('✅ Found assistant voice preferences:', assistantVoicePrefs);
+        }
+      }
+      
+      // Update the processedProfile object to include the assistant key:
+      const processedProfile = {
+        // ... existing fields ...
+        
+        // Add these new fields:
+        assistantKey: assistantVoicePrefs?.assistant_key || 
+                      personaSettings.assistant_key || 
+                      personaSettings.assistantKey || 
+                      profileDetails?.username || 
+                      resolvedSlug,
+        
+        voicePrefs: assistantVoicePrefs,
+        
+        // Enhanced voice preference with proper structure
+        voicePreference: {
+          voice_id: assistantVoicePrefs?.voice_id || 
+                    voicePreference?.voice_id || 
+                    voicePreference?.voiceId || 
+                    'default_voice',
+          provider: assistantVoicePrefs?.provider || 'elevenlabs',
+          model: assistantVoicePrefs?.model || 'eleven_monolingual_v1',
+          assistant_key: assistantVoicePrefs?.assistant_key || 
+                         personaSettings.assistant_key || 
+                         resolvedSlug,
+          ...voicePreference
+        },
+        
+        // ... rest of existing fields
+      };
+      
       let profilesMap = new Map(profileRecord ? [[profileRecord.id, profileRecord]] : []);
 
       if (!matchedUser) {
