@@ -346,60 +346,45 @@ const VoiceChat = () => {
       };
 
       if (!voicePreference) {
-        const assistantIds = new Set(
-          [
-            matchedUser.user_id,
-            personaSettings.assistant_id,
-            personaSettings.assistantId,
-          ]
-            .map((value) => (value ? value.toString().trim() : ''))
-            .filter(Boolean)
-        );
-
-        const assistantKeys = new Set(
+        const assistantKeyCandidates = new Set(
           [
             personaSettings.assistant_key,
             personaSettings.assistantKey,
             personaSettings.slug,
             personaSettings.slug?.toString().trim().toLowerCase(),
-            resolvedSlug,
-          ]
-            .map((value) => (value ? value.toString().trim() : ''))
-            .filter(Boolean)
-        );
-
-        const usernameCandidates = new Set(
-          [
+            personaSettings.identifier,
+            personaSettings.voice_assistant_key,
+            personaSettings.voiceAssistantKey,
+            personaSettings.id,
+            personaSettings.key,
             profileDetails?.username,
             profileDetails?.username?.toString().trim().toLowerCase(),
+            matchedUser.user_id,
+            matchedUser.user_id ? matchedUser.user_id.toString() : '',
+            matchedUser.email?.split('@')[0],
+            resolvedSlug,
             slug,
           ]
+            .concat(Array.from(slugCandidates))
             .map((value) => (value ? value.toString().trim() : ''))
             .filter(Boolean)
         );
 
-        slugCandidates.forEach((value) => assistantKeys.add(value));
-        usernameCandidates.forEach((value) => assistantKeys.add(value));
-
-        const orFilters = [];
-        assistantIds.forEach((id) => {
-          orFilters.push(`assistant_id.eq.${id}`);
-        });
-        assistantKeys.forEach((key) => {
-          orFilters.push(`assistant_key.eq.${key}`);
-        });
-
-        if (orFilters.length > 0) {
+        if (assistantKeyCandidates.size > 0) {
           let voicePrefQuery = supabase
             .from('assistant_voice_prefs')
-            .select('id, tenant_id, assistant_id, assistant_key, provider, voice_id, model, params')
+            .select('id, tenant_id, assistant_key, provider, voice_id, model, params')
+            .order('updated_at', { ascending: false })
             .limit(1);
 
           if (matchedUser.tenant_id) {
             voicePrefQuery = voicePrefQuery.eq('tenant_id', matchedUser.tenant_id);
           }
 
-          const { data: voicePrefMatches, error: voicePrefError } = await voicePrefQuery.or(orFilters.join(','));
+          const { data: voicePrefMatches, error: voicePrefError } = await voicePrefQuery.in(
+            'assistant_key',
+            Array.from(assistantKeyCandidates)
+          );
 
           if (voicePrefError) {
             if (isPermissionError(voicePrefError)) {
