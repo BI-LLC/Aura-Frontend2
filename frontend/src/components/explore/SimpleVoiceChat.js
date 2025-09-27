@@ -1,9 +1,39 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import './VoiceChat.css';
 
+const resolveVoiceId = (preference) => {
+  if (!preference) {
+    return null;
+  }
+
+  if (typeof preference === 'string') {
+    return preference;
+  }
+
+  if (typeof preference === 'object') {
+    return (
+      preference.voice_id ||
+      preference.voiceId ||
+      preference.elevenlabs_voice_id ||
+      preference.elevenlabsVoiceId ||
+      (typeof preference.voice === 'string'
+        ? preference.voice
+        : preference.voice?.voice_id || preference.voice?.voiceId || preference.voice?.id) ||
+      preference.id ||
+      null
+    );
+  }
+
+  return null;
+};
+
 const SimpleVoiceChat = () => {
   const { user, getToken } = useAuth();
+  const location = useLocation();
+  const navigationProfile = location.state?.profile || null;
+  const resolvedVoiceId = resolveVoiceId(navigationProfile?.voicePreference);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [transcript, setTranscript] = useState([]);
@@ -169,16 +199,22 @@ const SimpleVoiceChat = () => {
   };
 
   const synthesizeSpeech = async (text) => {
+    const params = new URLSearchParams({
+      text: text.substring(0, 500), // Limit text length
+      stability: '0.5',
+      similarity_boost: '0.75'
+    });
+
+    if (resolvedVoiceId) {
+      params.append('voice_id', resolvedVoiceId.toString());
+    }
+
     const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/voice/synthesize`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'
       },
-      body: new URLSearchParams({
-        text: text.substring(0, 500), // Limit text length
-        stability: '0.5',
-        similarity_boost: '0.75'
-      })
+      body: params
     });
     
     if (!response.ok) {

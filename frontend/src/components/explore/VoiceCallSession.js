@@ -45,6 +45,35 @@ const VoiceCallSession = () => {
     [assistantName]
   );
 
+  const resolvedVoiceId = useMemo(() => {
+    const preference = profile?.voicePreference;
+    if (!preference) {
+      return null;
+    }
+
+    if (typeof preference === 'string') {
+      return preference;
+    }
+
+    if (typeof preference === 'object') {
+      return (
+        preference.voice_id ||
+        preference.voiceId ||
+        preference.elevenlabs_voice_id ||
+        preference.elevenlabsVoiceId ||
+        (typeof preference.voice === 'string'
+          ? preference.voice
+          : preference.voice?.voice_id ||
+            preference.voice?.voiceId ||
+            preference.voice?.id) ||
+        preference.id ||
+        null
+      );
+    }
+
+    return null;
+  }, [profile]);
+
   const connectionLabel = useMemo(() => {
     if (connectionError) {
       return connectionError;
@@ -169,6 +198,47 @@ const VoiceCallSession = () => {
                 } catch (audioError) {
                   console.error('Audio playback error:', audioError);
                 }
+              } else if (data.text) {
+                const synthesizedAudio = await synthesizeSpeech(data.text);
+
+                if (synthesizedAudio) {
+                  try {
+                    const audioBlob = new Blob(
+                      [Uint8Array.from(atob(synthesizedAudio), (c) => c.charCodeAt(0))],
+                      { type: 'audio/mpeg' }
+                    );
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(audioUrl);
+
+                    setIsAssistantSpeaking(true);
+                    await audio.play();
+
+                    setTranscript((prev) => [
+                      ...prev,
+                      {
+                        speaker: assistantName,
+                        text: data.text,
+                        timestamp: new Date(),
+                      },
+                    ]);
+
+                    audio.onended = () => {
+                      setIsAssistantSpeaking(false);
+                      URL.revokeObjectURL(audioUrl);
+                    };
+                  } catch (audioError) {
+                    console.error('Audio playback error:', audioError);
+                  }
+                } else {
+                  setTranscript((prev) => [
+                    ...prev,
+                    {
+                      speaker: assistantName,
+                      text: data.text,
+                      timestamp: new Date(),
+                    },
+                  ]);
+                }
               }
               break;
             case 'error':
@@ -208,6 +278,44 @@ const VoiceCallSession = () => {
       console.error('WebSocket connection error:', error);
       setConnectionError('Failed to connect');
       return false;
+    }
+  };
+
+  const synthesizeSpeech = async (text) => {
+    if (!text) {
+      return null;
+    }
+
+    try {
+      const token = typeof getToken === 'function' ? getToken() : null;
+      const params = new URLSearchParams({
+        text: text.substring(0, 500),
+        stability: '0.5',
+        similarity_boost: '0.75',
+      });
+
+      if (resolvedVoiceId) {
+        params.append('voice_id', resolvedVoiceId.toString());
+      }
+
+      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/voice/synthesize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: params,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Synthesis failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      return result.success && result.audio ? result.audio : null;
+    } catch (error) {
+      console.error('Voice synthesis error:', error);
+      return null;
     }
   };
 

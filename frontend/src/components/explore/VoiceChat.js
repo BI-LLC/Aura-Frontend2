@@ -374,6 +374,12 @@ const VoiceChat = () => {
       const conversationsCount = conversations.length;
       const totalMessages = conversations.reduce((sum, conv) => sum + (conv.message_count || 0), 0);
 
+      const voicePreference =
+        matchedUser.voice_preference ||
+        personaSettings.voice_preference ||
+        profileDetails?.voice_preference ||
+        null;
+
       const processedProfile = {
         id: matchedUser.user_id,
         name: displayName,
@@ -401,7 +407,8 @@ const VoiceChat = () => {
         suggestedQuestions: generateSuggestedQuestions(expertiseAreas),
         keyTopics: conversations
           .flatMap(conv => Array.isArray(conv.key_topics) ? conv.key_topics : [])
-          .slice(0, 6)
+          .slice(0, 6),
+        voicePreference,
       };
 
       setAvatarError(false);
