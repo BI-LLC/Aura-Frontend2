@@ -24,7 +24,7 @@ const VoiceCallSession = () => {
 
   const navigationProfile = location.state?.profile || null;
 
-  const [profile] = useState(navigationProfile);
+  const [profile, setProfile] = useState(navigationProfile);
   // const [isMuted, setIsMuted] = useState(false); // Currently unused
   const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -59,6 +59,12 @@ const VoiceCallSession = () => {
 
     return () => clearInterval(timer);
   }, [profile]);
+
+  useEffect(() => {
+    if (navigationProfile) {
+      setProfile(navigationProfile);
+    }
+  }, [navigationProfile]);
 
   // Simple WebSocket connection for voice conversation
   const connectWebSocket = async () => {

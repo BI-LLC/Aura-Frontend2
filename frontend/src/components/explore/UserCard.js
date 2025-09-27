@@ -30,6 +30,8 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
   const [copyStatus, setCopyStatus] = useState('idle');
 
   // Default placeholder data if user prop is incomplete
+  const sanitizedPrimaryName = sanitizeName(user?.name);
+
   const userData = {
     id: user?.id || '',
     slug: user?.slug || '',
@@ -58,6 +60,11 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
     voiceEnabled: user?.voiceEnabled ?? true,
     lastActive: user?.lastActive ? new Date(user?.lastActive) : new Date(),
     isVerified: user?.isVerified ?? false,
+    title:
+      user?.title ||
+      user?.headline ||
+      user?.tagline ||
+      (sanitizedPrimaryName ? `${sanitizedPrimaryName}'s AI Assistant` : ''),
     ...user
   };
 
@@ -70,6 +77,10 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
     if (avatarSource) {
       userData.avatar = avatarSource.toString().charAt(0).toUpperCase();
     }
+  }
+
+  if (!userData.title) {
+    userData.title = `${userData.name || 'Aura Assistant'}'s AI Assistant`;
   }
 
   const shareUrl = useMemo(() => {
@@ -94,6 +105,33 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
     } else {
       navigate(`/chat/${targetSlug}`);
     }
+  };
+
+  /**
+   * Handle starting a voice call session
+   */
+  const handleStartCall = (e) => {
+    e.stopPropagation();
+
+    const targetSlug = userData.slug || userData.username || userData.id;
+    if (!targetSlug) {
+      return;
+    }
+
+    const callProfile = {
+      ...userData,
+      slug: targetSlug,
+      title:
+        userData.title ||
+        userData.tagline ||
+        (userData.name ? `${userData.name}'s AI Assistant` : 'Aura Assistant')
+    };
+
+    navigate(`/chat/${targetSlug}/call`, {
+      state: {
+        profile: callProfile
+      }
+    });
   };
 
   /**
@@ -223,6 +261,15 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
           >
             Chat
           </button>
+          {userData.voiceEnabled && (
+            <button
+              className="chat-btn secondary"
+              onClick={handleStartCall}
+              title="Start voice call"
+            >
+              Call
+            </button>
+          )}
         </div>
       </div>
     );
@@ -350,12 +397,20 @@ const UserCard = ({ user, onChatClick, showActions = true, compact = false }) =>
             View Profile
           </button>
           
-          <button 
+          <button
             className="btn primary"
             onClick={handleChatClick}
           >
             Start Chat
           </button>
+          {userData.voiceEnabled && (
+            <button
+              className="btn secondary"
+              onClick={handleStartCall}
+            >
+              Start Call
+            </button>
+          )}
         </div>
       )}
 
