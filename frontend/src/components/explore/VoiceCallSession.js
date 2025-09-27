@@ -1,7 +1,7 @@
 // Aura Voice AI - Dedicated Voice Call Session
 // ============================================
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import { useAuth } from '../../context/AuthContext';
@@ -91,6 +91,36 @@ const VoiceCallSession = () => {
 
     return () => clearInterval(timer);
   }, [isConnected]);
+
+  const sendAudioChunk = useCallback(async (blob) => {
+    if (
+      !blob ||
+      blob.size === 0 ||
+      isMutedRef.current ||
+      websocketRef.current?.readyState !== WebSocket.OPEN
+    ) {
+      return;
+    }
+
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i += 1) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(binary);
+
+      websocketRef.current.send(
+        JSON.stringify({
+          type: 'audio_chunk',
+          audio: base64,
+        })
+      );
+    } catch (error) {
+      console.error('Failed to stream audio chunk:', error);
+    }
+  }, []);
 
   const connectWebSocket = async () => {
     if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
@@ -224,42 +254,64 @@ const VoiceCallSession = () => {
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
         },
       });
 
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
-      });
+      const preferredMimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+      ];
+
+      const mimeType = preferredMimeTypes.find((type) =>
+        typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)
+      );
+
+      let mediaRecorder;
+      try {
+        mediaRecorder = mimeType
+          ? new MediaRecorder(stream, {
+              mimeType,
+              audioBitsPerSecond: 128000,
+            })
+          : new MediaRecorder(stream);
+      } catch (recorderError) {
+        console.warn('Falling back to default MediaRecorder options:', recorderError);
+        mediaRecorder = new MediaRecorder(stream);
+      }
 
       mediaRecorderRef.current = mediaRecorder;
       streamRef.current = stream;
 
       mediaRecorder.ondataavailable = (event) => {
-        if (
-          event.data.size > 0 &&
-          websocketRef.current?.readyState === WebSocket.OPEN &&
-          !isMutedRef.current
-        ) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64 = reader.result.split(',')[1];
-            websocketRef.current.send(
-              JSON.stringify({
-                type: 'audio_chunk',
-                audio: base64,
-              })
-            );
-          };
-          reader.readAsDataURL(event.data);
+        if (event.data) {
+          sendAudioChunk(event.data);
         }
+      };
+
+      mediaRecorder.onerror = (event) => {
+        console.error('MediaRecorder error:', event.error);
+        setTranscript((prev) => [
+          ...prev,
+          {
+            speaker: 'System',
+            text: 'Microphone error detected. Please refresh and try again.',
+            timestamp: new Date(),
+          },
+        ]);
+        setIsRecording(false);
       };
 
       mediaRecorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
+        mediaRecorderRef.current = null;
       };
 
       mediaRecorder.start(250);
