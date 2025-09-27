@@ -223,7 +223,7 @@ const VoiceCallSession = () => {
   const synthesizeSpeech = useCallback(
     async (text) => {
       const token = getToken && typeof getToken === 'function' ? getToken() : null;
-      if (!token || !text) {
+      if (!token || !text || !text.trim()) {
         return null;
       }
 
@@ -246,47 +246,149 @@ const VoiceCallSession = () => {
       }
 
       const result = await response.json();
-      return result?.audio || null;
+
+      if (result?.success === false) {
+        throw new Error(result?.message || 'Speech synthesis unavailable.');
+      }
+
+      if (result?.audio) {
+        return {
+          base64: result.audio,
+          contentType: result?.content_type || result?.mime_type || 'audio/mpeg',
+        };
+      }
+
+      if (result?.audioContent) {
+        return {
+          base64: result.audioContent,
+          contentType: result?.contentType || 'audio/mpeg',
+        };
+      }
+
+      if (result?.audio_url || result?.url) {
+        return {
+          url: result.audio_url || result.url,
+        };
+      }
+
+      return null;
     },
     [getToken]
   );
 
   const playAssistantAudio = useCallback(
     async (text) => {
-      let audioUrl;
+      let objectUrlCleanup = () => {};
       try {
-        const audioBase64 = await synthesizeSpeech(text);
-        if (!audioBase64) {
-          return;
+        const synthesisResult = await synthesizeSpeech(text);
+        if (!synthesisResult) {
+          setTranscript((prev) => [
+            ...prev,
+            {
+              speaker: 'System',
+              text: 'Assistant response did not include audio. Showing text reply only.',
+              timestamp: new Date(),
+            },
+          ]);
+          return false;
         }
 
-        const audioBytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
-        const audioBlob = new Blob([audioBytes], { type: 'audio/mpeg' });
-        audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio(audioUrl);
-        activeAudioRef.current = audio;
+        if (activeAudioRef.current) {
+          try {
+            activeAudioRef.current.pause();
+            activeAudioRef.current.currentTime = 0;
+          } catch (stopError) {
+            console.debug('Previous audio cleanup issue:', stopError);
+          }
+          activeAudioRef.current = null;
+        }
 
-        setIsAssistantSpeaking(true);
+        let audioSource = synthesisResult.url || '';
+        if (synthesisResult.base64) {
+          const byteCharacters = atob(synthesisResult.base64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i += 1) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const audioBytes = new Uint8Array(byteNumbers);
+          const audioBlob = new Blob([audioBytes], {
+            type: synthesisResult.contentType || 'audio/mpeg',
+          });
+          const objectUrl = URL.createObjectURL(audioBlob);
+          objectUrlCleanup = () => URL.revokeObjectURL(objectUrl);
+          audioSource = objectUrl;
+        }
 
-        await audio.play();
+        if (!audioSource) {
+          setTranscript((prev) => [
+            ...prev,
+            {
+              speaker: 'System',
+              text: 'Assistant response audio was empty. Showing text reply only.',
+              timestamp: new Date(),
+            },
+          ]);
+          return false;
+        }
 
-        audio.onended = () => {
+        const audio = new Audio(audioSource);
+        audio.preload = 'auto';
+
+        const handleComplete = () => {
           setIsAssistantSpeaking(false);
-          URL.revokeObjectURL(audioUrl);
+          objectUrlCleanup();
+          audio.removeEventListener('ended', handleComplete);
+          audio.removeEventListener('error', handleError);
           if (activeAudioRef.current === audio) {
             activeAudioRef.current = null;
           }
         };
+
+        const handleError = (event) => {
+          console.error('Audio playback error event:', event);
+          setIsAssistantSpeaking(false);
+          objectUrlCleanup();
+          audio.removeEventListener('ended', handleComplete);
+          audio.removeEventListener('error', handleError);
+          if (activeAudioRef.current === audio) {
+            activeAudioRef.current = null;
+          }
+          setTranscript((prev) => [
+            ...prev,
+            {
+              speaker: 'System',
+              text: 'We could not play the assistant’s audio reply. Please check your volume or try again.',
+              timestamp: new Date(),
+            },
+          ]);
+        };
+
+        audio.addEventListener('ended', handleComplete);
+        audio.addEventListener('error', handleError);
+
+        activeAudioRef.current = audio;
+        setIsAssistantSpeaking(true);
+
+        await audio.play();
+
+        return true;
       } catch (error) {
         console.error('Audio playback error:', error);
         setIsAssistantSpeaking(false);
-        if (audioUrl) {
-          URL.revokeObjectURL(audioUrl);
-        }
+        objectUrlCleanup();
         activeAudioRef.current = null;
+        setTranscript((prev) => [
+          ...prev,
+          {
+            speaker: 'System',
+            text: 'Speech synthesis is temporarily unavailable. Showing text reply only.',
+            timestamp: new Date(),
+          },
+        ]);
+        return false;
       }
     },
-    [synthesizeSpeech]
+    [setTranscript, synthesizeSpeech]
   );
 
   const processRecording = useCallback(async () => {
