@@ -261,11 +261,8 @@ const VoiceCallSession = () => {
         text: text.substring(0, 500),
         stability: '0.5',
         similarity_boost: '0.75',
+        assistant_key: assistantKey,
       });
-
-      if (assistantKey) {
-        params.append('assistant_key', assistantKey);
-      }
 
       if (tenantId) {
         params.append('tenant_id', tenantId);
