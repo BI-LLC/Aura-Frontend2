@@ -7,6 +7,8 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import LoadingSpinner from '../common/LoadingSpinner';
 
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai';
+
 const formatDuration = (seconds) => {
   const mins = Math.floor(seconds / 60)
     .toString()
@@ -35,9 +37,12 @@ const VoiceCallSession = () => {
   const [transcript, setTranscript] = useState([]);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const transcriptRef = useRef(null);
-  const websocketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const streamRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recorderMimeTypeRef = useRef('audio/webm');
+  const activeAudioRef = useRef(null);
+  const skipProcessingRef = useRef(false);
   const isMutedRef = useRef(false);
   const { getToken } = useAuth();
 
@@ -57,11 +62,14 @@ const VoiceCallSession = () => {
     if (isRecording) {
       return 'Live conversation';
     }
+    if (isProcessing) {
+      return 'Processing audio…';
+    }
     if (isConnected) {
       return 'Connected';
     }
     return 'Ready to connect';
-  }, [assistantFirstName, connectionError, isAssistantSpeaking, isConnected, isRecording]);
+  }, [assistantFirstName, connectionError, isAssistantSpeaking, isConnected, isProcessing, isRecording]);
 
   const connectionTone = useMemo(() => {
     if (connectionError) {
@@ -73,11 +81,14 @@ const VoiceCallSession = () => {
     if (isRecording) {
       return 'listening';
     }
+    if (isProcessing) {
+      return 'connected';
+    }
     if (isConnected) {
       return 'connected';
     }
     return 'idle';
-  }, [connectionError, isAssistantSpeaking, isConnected, isRecording]);
+  }, [connectionError, isAssistantSpeaking, isConnected, isProcessing, isRecording]);
 
   useEffect(() => {
     if (!isConnected) {
@@ -91,166 +102,289 @@ const VoiceCallSession = () => {
 
     return () => clearInterval(timer);
   }, [isConnected]);
+  const checkBackendConnection = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/health`);
+      if (response.ok) {
+        const data = await response.json().catch(() => null);
+        if (data?.status && !['healthy', 'ok'].includes(data.status)) {
+          throw new Error('Voice service unavailable');
+        }
+        setConnectionError(null);
+        return true;
+      }
 
-  const sendAudioChunk = useCallback(async (blob) => {
-    if (
-      !blob ||
-      blob.size === 0 ||
-      isMutedRef.current ||
-      websocketRef.current?.readyState !== WebSocket.OPEN
-    ) {
+      throw new Error(`Health check failed (${response.status})`);
+    } catch (primaryError) {
+      try {
+        const fallbackResponse = await fetch(`${API_BASE_URL}/voice/status`);
+        if (fallbackResponse.ok) {
+          const status = await fallbackResponse.json().catch(() => null);
+          if (status?.status && ['healthy', 'operational'].includes(status.status)) {
+            setConnectionError(null);
+            return true;
+          }
+        }
+      } catch (fallbackError) {
+        console.debug('Fallback health check failed:', fallbackError);
+      }
+
+      console.error('Voice service connection error:', primaryError);
+      setConnectionError('Unable to connect to the voice service. Please try again.');
+      return false;
+    }
+  }, []);
+
+  const determineFilename = (mimeType) => {
+    if (!mimeType) {
+      return 'audio.webm';
+    }
+
+    if (mimeType.includes('wav')) {
+      return 'audio.wav';
+    }
+
+    if (mimeType.includes('ogg')) {
+      return 'audio.ogg';
+    }
+
+    if (mimeType.includes('mp4')) {
+      return 'audio.mp4';
+    }
+
+    return 'audio.webm';
+  };
+
+  const transcribeAudio = useCallback(
+    async (audioBlob) => {
+      const token = getToken && typeof getToken === 'function' ? getToken() : null;
+      if (!token) {
+        throw new Error('Authentication required. Please log in.');
+      }
+
+      const formData = new FormData();
+      const filename = determineFilename(audioBlob.type || recorderMimeTypeRef.current);
+      formData.append('audio', audioBlob, filename);
+      formData.append('language', 'en');
+
+      const response = await fetch(`${API_BASE_URL}/voice/transcribe`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`Transcription failed: ${response.status}${errorText ? ` - ${errorText}` : ''}`);
+      }
+
+      const result = await response.json();
+      return result.text || result.transcription || '';
+    },
+    [getToken]
+  );
+
+  const fetchAssistantReply = useCallback(
+    async (message) => {
+      const token = getToken && typeof getToken === 'function' ? getToken() : null;
+      if (!token) {
+        throw new Error('Authentication required. Please log in.');
+      }
+
+      const response = await fetch(`${API_BASE_URL}/chat/message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          message,
+          user_id: profile?.id || 'anonymous',
+          organization: 'default_org',
+          use_memory: true,
+          search_knowledge: true,
+          slug: profile?.slug || slug,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`AI response failed: ${response.status}${errorText ? ` - ${errorText}` : ''}`);
+      }
+
+      const result = await response.json();
+      return result.response || '';
+    },
+    [getToken, profile, slug]
+  );
+
+  const synthesizeSpeech = useCallback(
+    async (text) => {
+      const token = getToken && typeof getToken === 'function' ? getToken() : null;
+      if (!token || !text) {
+        return null;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/voice/synthesize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `Bearer ${token}`,
+        },
+        body: new URLSearchParams({
+          text: text.substring(0, 500),
+          stability: '0.5',
+          similarity_boost: '0.75',
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`Speech synthesis failed: ${response.status}${errorText ? ` - ${errorText}` : ''}`);
+      }
+
+      const result = await response.json();
+      return result?.audio || null;
+    },
+    [getToken]
+  );
+
+  const playAssistantAudio = useCallback(
+    async (text) => {
+      let audioUrl;
+      try {
+        const audioBase64 = await synthesizeSpeech(text);
+        if (!audioBase64) {
+          return;
+        }
+
+        const audioBytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
+        const audioBlob = new Blob([audioBytes], { type: 'audio/mpeg' });
+        audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        activeAudioRef.current = audio;
+
+        setIsAssistantSpeaking(true);
+
+        await audio.play();
+
+        audio.onended = () => {
+          setIsAssistantSpeaking(false);
+          URL.revokeObjectURL(audioUrl);
+          if (activeAudioRef.current === audio) {
+            activeAudioRef.current = null;
+          }
+        };
+      } catch (error) {
+        console.error('Audio playback error:', error);
+        setIsAssistantSpeaking(false);
+        if (audioUrl) {
+          URL.revokeObjectURL(audioUrl);
+        }
+        activeAudioRef.current = null;
+      }
+    },
+    [synthesizeSpeech]
+  );
+
+  const processRecording = useCallback(async () => {
+    if (skipProcessingRef.current) {
+      skipProcessingRef.current = false;
+      audioChunksRef.current = [];
+      setIsProcessing(false);
+      return;
+    }
+
+    if (!audioChunksRef.current.length) {
+      setIsProcessing(false);
+      setTranscript((prev) => [
+        ...prev,
+        {
+          speaker: 'System',
+          text: 'No speech detected. Tap “Start conversation” to try again.',
+          timestamp: new Date(),
+        },
+      ]);
       return;
     }
 
     try {
-      const arrayBuffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i += 1) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const base64 = btoa(binary);
+      const audioBlob = new Blob(audioChunksRef.current, {
+        type: recorderMimeTypeRef.current || 'audio/webm',
+      });
 
-      websocketRef.current.send(
-        JSON.stringify({
-          type: 'audio_chunk',
-          audio: base64,
-        })
-      );
-    } catch (error) {
-      console.error('Failed to stream audio chunk:', error);
-    }
-  }, []);
+      const transcription = await transcribeAudio(audioBlob);
 
-  const connectWebSocket = async () => {
-    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-      return true;
-    }
-
-    const rawToken = getToken && typeof getToken === 'function' ? getToken() : null;
-    if (!rawToken) {
-      setConnectionError('Authentication required. Please log in.');
-      return false;
-    }
-
-    try {
-      const token = rawToken.startsWith('Bearer ') ? rawToken.slice(7) : rawToken;
-      const wsUrl = new URL('wss://api.iaura.ai/ws/voice/continuous');
-      wsUrl.searchParams.set('token', token);
-      if (slug) {
-        wsUrl.searchParams.set('slug', slug);
-      }
-
-      const ws = new WebSocket(wsUrl.toString());
-      websocketRef.current = ws;
-
-      ws.onopen = () => {
-        setIsConnected(true);
-        setConnectionError(null);
+      if (!transcription || !transcription.trim()) {
         setTranscript((prev) => [
           ...prev,
           {
             speaker: 'System',
-            text: 'Connected to AI assistant. You can start speaking.',
+            text: 'We couldn’t hear anything. Please try speaking again.',
             timestamp: new Date(),
           },
         ]);
-      };
+        return;
+      }
 
-      ws.onmessage = async (event) => {
-        try {
-          const data = JSON.parse(event.data);
+      setTranscript((prev) => [
+        ...prev,
+        {
+          speaker: 'You',
+          text: transcription,
+          timestamp: new Date(),
+        },
+      ]);
 
-          switch (data.type) {
-            case 'user_transcript':
-              setTranscript((prev) => [
-                ...prev,
-                {
-                  speaker: 'You',
-                  text: data.text,
-                  timestamp: new Date(),
-                },
-              ]);
-              break;
-            case 'ai_audio':
-              if (data.audio) {
-                try {
-                  const audioBlob = new Blob(
-                    [Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0))],
-                    { type: 'audio/mpeg' }
-                  );
-                  const audioUrl = URL.createObjectURL(audioBlob);
-                  const audio = new Audio(audioUrl);
+      const reply = await fetchAssistantReply(transcription);
 
-                  setIsAssistantSpeaking(true);
-                  await audio.play();
+      if (reply) {
+        setTranscript((prev) => [
+          ...prev,
+          {
+            speaker: assistantName,
+            text: reply,
+            timestamp: new Date(),
+          },
+        ]);
 
-                  setTranscript((prev) => [
-                    ...prev,
-                    {
-                      speaker: assistantName,
-                      text: data.text || 'AI responded',
-                      timestamp: new Date(),
-                    },
-                  ]);
-
-                  audio.onended = () => {
-                    setIsAssistantSpeaking(false);
-                    URL.revokeObjectURL(audioUrl);
-                  };
-                } catch (audioError) {
-                  console.error('Audio playback error:', audioError);
-                }
-              }
-              break;
-            case 'error':
-              setConnectionError(data.message);
-              setTranscript((prev) => [
-                ...prev,
-                {
-                  speaker: 'System',
-                  text: `Error: ${data.message}`,
-                  timestamp: new Date(),
-                },
-              ]);
-              break;
-            default:
-              break;
-          }
-        } catch (parseError) {
-          console.error('Message parse error:', parseError);
-        }
-      };
-
-      ws.onclose = (event) => {
-        setIsConnected(false);
-        setIsRecording(false);
-        if (event.code !== 1000) {
-          setConnectionError('Connection lost');
-        }
-      };
-
-      ws.onerror = () => {
-        setConnectionError('Connection failed');
-        setIsConnected(false);
-      };
-
-      return true;
+        await playAssistantAudio(reply);
+      }
     } catch (error) {
-      console.error('WebSocket connection error:', error);
-      setConnectionError('Failed to connect');
-      return false;
+      console.error('Error processing recording:', error);
+      setTranscript((prev) => [
+        ...prev,
+        {
+          speaker: 'System',
+          text: error.message || 'Failed to process audio. Please try again.',
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      audioChunksRef.current = [];
+      setIsProcessing(false);
     }
-  };
+  }, [assistantName, fetchAssistantReply, playAssistantAudio, transcribeAudio]);
 
-  const startVoiceChat = async () => {
-    if (!profile || isRecording || isProcessing) return;
+  const startVoiceChat = useCallback(async () => {
+    if (!profile || isRecording || isProcessing) {
+      return;
+    }
+
+    const hasConnection = await checkBackendConnection();
+    if (!hasConnection) {
+      return;
+    }
 
     try {
-      if (!isConnected) {
-        const connected = await connectWebSocket();
-        if (!connected) return;
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+        activeAudioRef.current.currentTime = 0;
+        activeAudioRef.current = null;
       }
+      setIsAssistantSpeaking(false);
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -269,8 +403,8 @@ const VoiceCallSession = () => {
         'audio/mp4',
       ];
 
-      const mimeType = preferredMimeTypes.find((type) =>
-        typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)
+      const mimeType = preferredMimeTypes.find(
+        (type) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)
       );
 
       let mediaRecorder;
@@ -286,12 +420,15 @@ const VoiceCallSession = () => {
         mediaRecorder = new MediaRecorder(stream);
       }
 
+      recorderMimeTypeRef.current = mediaRecorder.mimeType || mimeType || 'audio/webm';
       mediaRecorderRef.current = mediaRecorder;
       streamRef.current = stream;
+      audioChunksRef.current = [];
+      skipProcessingRef.current = false;
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data) {
-          sendAudioChunk(event.data);
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
       };
 
@@ -306,24 +443,27 @@ const VoiceCallSession = () => {
           },
         ]);
         setIsRecording(false);
+        setIsProcessing(false);
       };
 
       mediaRecorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
         mediaRecorderRef.current = null;
+        processRecording();
       };
 
-      mediaRecorder.start(250);
+      mediaRecorder.start();
       setIsRecording(true);
       setIsProcessing(false);
+      setIsConnected(true);
       setMuteState(false);
 
       setTranscript((prev) => [
         ...prev,
         {
           speaker: 'System',
-          text: '🎤 Microphone active. Speak freely to your assistant.',
+          text: '🎤 Listening… tap stop when you are done speaking.',
           timestamp: new Date(),
         },
       ]);
@@ -340,41 +480,51 @@ const VoiceCallSession = () => {
         },
       ]);
     }
-  };
+  }, [checkBackendConnection, isProcessing, isRecording, processRecording, profile]);
 
-  const stopVoiceChat = () => {
-    if (!isRecording) return;
-
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
+  const stopVoiceChat = useCallback(() => {
+    if (!isRecording) {
+      return;
     }
 
-    setIsRecording(false);
-    setIsProcessing(true);
-    setTranscript((prev) => [
-      ...prev,
-      {
-        speaker: 'System',
-        text: 'Microphone paused. Tap to resume when you are ready.',
-        timestamp: new Date(),
-      },
-    ]);
-  };
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      setIsRecording(false);
+      setIsProcessing(true);
+      mediaRecorderRef.current.stop();
+      setTranscript((prev) => [
+        ...prev,
+        {
+          speaker: 'System',
+          text: 'Processing your message…',
+          timestamp: new Date(),
+        },
+      ]);
+    }
+  }, [isRecording]);
 
   useEffect(() => {
     return () => {
-      if (mediaRecorderRef.current) {
-        if (mediaRecorderRef.current.state === 'recording') {
-          mediaRecorderRef.current.stop();
-        }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        skipProcessingRef.current = true;
+        mediaRecorderRef.current.stop();
       }
+
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
       }
-      disconnectWebSocket();
+
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+        activeAudioRef.current.currentTime = 0;
+        activeAudioRef.current = null;
+      }
     };
   }, []);
+
+  useEffect(() => {
+    checkBackendConnection();
+  }, [checkBackendConnection]);
 
   useEffect(() => {
     if (transcriptRef.current) {
@@ -393,47 +543,57 @@ const VoiceCallSession = () => {
     }
   };
 
-  const disconnectWebSocket = () => {
-    if (websocketRef.current) {
-      websocketRef.current.close();
-      websocketRef.current = null;
-    }
-    setMuteState(false);
-    setIsConnected(false);
-    setIsRecording(false);
-  };
-
   const handlePrimaryControl = async () => {
-    if (isRecording) {
-      setMuteState(!isMutedRef.current);
+    if (isProcessing) {
       return;
     }
 
-    if (!isConnected) {
-      const connected = await connectWebSocket();
-      if (!connected) {
-        return;
-      }
+    if (isRecording) {
+      stopVoiceChat();
+      return;
     }
 
     await startVoiceChat();
   };
 
   const primaryControlLabel = () => {
-    if (!isConnected) {
-      return 'Connect & Start';
+    if (isProcessing) {
+      return 'Processing…';
     }
 
-    if (!isRecording) {
-      return isProcessing ? 'Processing…' : 'Start conversation';
+    if (isRecording) {
+      return 'Stop & transcribe';
     }
 
-    return isMuted ? 'Unmute microphone' : 'Mute microphone';
+    if (!isConnected || transcript.length === 0) {
+      return 'Start conversation';
+    }
+
+    return 'Speak again';
   };
 
   const handleEndCall = () => {
-    stopVoiceChat();
-    disconnectWebSocket();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      skipProcessingRef.current = true;
+      mediaRecorderRef.current.stop();
+    }
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+      activeAudioRef.current.currentTime = 0;
+      activeAudioRef.current = null;
+    }
+
+    audioChunksRef.current = [];
+    setIsRecording(false);
+    setIsProcessing(false);
+    setIsConnected(false);
+    setMuteState(false);
 
     const fallbackSlug = profile?.slug || slug;
     navigate(`/chat/${fallbackSlug}`);
