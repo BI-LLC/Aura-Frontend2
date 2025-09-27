@@ -34,10 +34,14 @@ const VoiceCallSession = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
+  const [autoResumePreference, setAutoResumePreference] = useState(true);
+  const [pendingAutoResume, setPendingAutoResume] = useState(false);
+  const [hasStartedConversation, setHasStartedConversation] = useState(false);
+  const [shouldRestartAfterResponse, setShouldRestartAfterResponse] = useState(false);
   const transcriptRef = useRef(null);
   const websocketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
+  const pendingAutoResumeRef = useRef(pendingAutoResume);
   const { user, getToken, isAuthenticated } = useAuth();
 
   const assistantName = profile?.name || 'Aura Assistant';
@@ -109,19 +113,30 @@ const VoiceCallSession = () => {
                   const audioBlob = new Blob([Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))], { type: 'audio/mpeg' });
                   const audioUrl = URL.createObjectURL(audioBlob);
                   const audio = new Audio(audioUrl);
-                  
+
+                  setIsProcessing(false);
                   setIsAssistantSpeaking(true);
                   await audio.play();
-                  
+
                   setTranscript(prev => [...prev, {
                     speaker: assistantName,
                     text: data.text || 'AI responded',
                     timestamp: new Date()
                   }]);
-                  
+
                   audio.onended = () => {
                     setIsAssistantSpeaking(false);
                     URL.revokeObjectURL(audioUrl);
+                    const shouldResume =
+                      pendingAutoResumeRef.current &&
+                      websocketRef.current?.readyState === WebSocket.OPEN;
+
+                    setPendingAutoResume(false);
+                    pendingAutoResumeRef.current = false;
+
+                    if (shouldResume) {
+                      setShouldRestartAfterResponse(true);
+                    }
                   };
                 } catch (audioError) {
                   console.error('Audio playback error:', audioError);
@@ -205,7 +220,6 @@ const VoiceCallSession = () => {
       });
 
       mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0 && websocketRef.current?.readyState === WebSocket.OPEN) {
@@ -230,13 +244,9 @@ const VoiceCallSession = () => {
       mediaRecorder.start(250); // Send data every 250ms
       setIsRecording(true);
       setIsProcessing(false);
-      
-      // Add user message to transcript
-      setTranscript(prev => [...prev, {
-        speaker: 'You',
-        text: '🎤 Recording...',
-        timestamp: new Date()
-      }]);
+      setPendingAutoResume(autoResumePreference);
+      pendingAutoResumeRef.current = autoResumePreference;
+      setHasStartedConversation(true);
 
       console.log('Continuous voice conversation started');
 
@@ -252,16 +262,33 @@ const VoiceCallSession = () => {
     }
   };
 
-  const stopVoiceChat = async () => {
+  const stopVoiceChat = ({ autoResumeNext = true } = {}) => {
     if (!isRecording) return;
-    
-    // Stop media recorder
+
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
     }
-    
+
     setIsRecording(false);
-    setIsProcessing(true);
+    setIsProcessing(autoResumeNext);
+    const nextResume = autoResumeNext && autoResumePreference;
+    setPendingAutoResume(nextResume);
+    pendingAutoResumeRef.current = nextResume;
+
+    if (!autoResumeNext) {
+      setTranscript(prev => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (!last || last.speaker !== 'System' || last.text !== 'Microphone paused. Tap the microphone to resume when you are ready.') {
+          next.push({
+            speaker: 'System',
+            text: 'Microphone paused. Tap the microphone to resume when you are ready.',
+            timestamp: new Date()
+          });
+        }
+        return next;
+      });
+    }
   };
 
   // Cleanup WebSocket connection
@@ -272,6 +299,9 @@ const VoiceCallSession = () => {
     }
     setIsConnected(false);
     setIsRecording(false);
+    setPendingAutoResume(false);
+    pendingAutoResumeRef.current = false;
+    setHasStartedConversation(false);
   };
 
   // Cleanup on component unmount
@@ -285,6 +315,23 @@ const VoiceCallSession = () => {
   }, []);
 
   useEffect(() => {
+    pendingAutoResumeRef.current = pendingAutoResume;
+  }, [pendingAutoResume]);
+
+  useEffect(() => {
+    if (!shouldRestartAfterResponse) return;
+    setShouldRestartAfterResponse(false);
+
+    if (
+      websocketRef.current?.readyState === WebSocket.OPEN &&
+      !isRecording &&
+      !isProcessing
+    ) {
+      startVoiceChat();
+    }
+  }, [shouldRestartAfterResponse, isRecording, isProcessing]);
+
+  useEffect(() => {
     if (transcriptRef.current) {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
     }
@@ -293,9 +340,39 @@ const VoiceCallSession = () => {
   const handleEndCall = () => {
     // Disconnect WebSocket and clean up
     disconnectWebSocket();
-    
+
     const fallbackSlug = profile?.slug || slug;
     navigate(`/chat/${fallbackSlug}`);
+  };
+
+  const handleMicToggle = () => {
+    if (connectionError && !isConnected) return;
+    if (isProcessing && !isRecording) return;
+
+    if (!isRecording) {
+      startVoiceChat();
+    } else {
+      stopVoiceChat({ autoResumeNext: true });
+    }
+  };
+
+  const handleManualPause = () => {
+    if (!isRecording) return;
+    stopVoiceChat({ autoResumeNext: false });
+  };
+
+  const toggleAutoResume = () => {
+    setAutoResumePreference((prev) => {
+      const next = !prev;
+      if (!next) {
+        setPendingAutoResume(false);
+        pendingAutoResumeRef.current = false;
+      } else if (!isRecording && hasStartedConversation) {
+        setPendingAutoResume(true);
+        pendingAutoResumeRef.current = true;
+      }
+      return next;
+    });
   };
 
   const handleBack = () => {
@@ -305,6 +382,106 @@ const VoiceCallSession = () => {
       navigate('/explore');
     }
   };
+
+  const conversationMessages = useMemo(
+    () => transcript.slice(-6),
+    [transcript]
+  );
+
+  const statusTitle = useMemo(() => {
+    if (connectionError && !isConnected) {
+      return 'Connection lost';
+    }
+    if (!isConnected) {
+      return 'Connecting';
+    }
+    if (isAssistantSpeaking) {
+      return `${assistantFirstName} is speaking`;
+    }
+    if (isRecording) {
+      return 'Listening';
+    }
+    if (isProcessing) {
+      return 'Processing';
+    }
+    if (hasStartedConversation) {
+      return 'Standing by';
+    }
+    return 'Ready to connect';
+  }, [
+    assistantFirstName,
+    connectionError,
+    hasStartedConversation,
+    isAssistantSpeaking,
+    isConnected,
+    isProcessing,
+    isRecording
+  ]);
+
+  const statusSubtitle = useMemo(() => {
+    if (!isConnected) {
+      return 'Establishing a secure channel';
+    }
+    if (isAssistantSpeaking) {
+      return 'Playing the assistant\'s response';
+    }
+    if (isRecording) {
+      return autoResumePreference
+        ? 'Continuous conversation enabled'
+        : 'Tap pause when you want to stop speaking';
+    }
+    if (isProcessing) {
+      return 'Transcribing and analysing your voice';
+    }
+    if (hasStartedConversation) {
+      return autoResumePreference ? 'Aura is ready for your next thought' : 'Tap the microphone to keep the call going';
+    }
+    return 'Tap the microphone to begin speaking';
+  }, [
+    autoResumePreference,
+    hasStartedConversation,
+    isAssistantSpeaking,
+    isConnected,
+    isProcessing,
+    isRecording
+  ]);
+
+  const statusChipVariant = useMemo(() => {
+    if (!isConnected) return 'disconnected';
+    if (isAssistantSpeaking) return 'speaking';
+    if (isRecording) return 'listening';
+    if (isProcessing) return 'processing';
+    return 'ready';
+  }, [isAssistantSpeaking, isConnected, isProcessing, isRecording]);
+
+  const micButtonDisabled = !isRecording && (!isConnected || isProcessing || isAssistantSpeaking);
+
+  const micButtonLabel = useMemo(() => {
+    if (isRecording) return 'Tap to pause';
+    if (isAssistantSpeaking) return 'Assistant speaking';
+    if (isProcessing) return 'Processing...';
+    if (!hasStartedConversation) return 'Start conversation';
+    return 'Tap to speak';
+  }, [hasStartedConversation, isAssistantSpeaking, isProcessing, isRecording]);
+
+  const controlHint = useMemo(() => {
+    if (!isConnected) return 'We\'ll start listening as soon as the secure link is ready.';
+    if (isAssistantSpeaking) return `${assistantFirstName} is finishing their thought.`;
+    if (isRecording) return 'Speak naturally — Aura will keep the mic open until you pause.';
+    if (isProcessing) return 'Hold on while Aura prepares a response.';
+    if (hasStartedConversation) return 'Tap the microphone when you\'re ready to share more.';
+    return 'Press the microphone to start the live call.';
+  }, [
+    assistantFirstName,
+    hasStartedConversation,
+    isAssistantSpeaking,
+    isConnected,
+    isProcessing,
+    isRecording
+  ]);
+
+  const autoResumeLabel = autoResumePreference ? 'Auto-continue on' : 'Auto-continue off';
+  const formattedDuration = formatDuration(elapsedSeconds);
 
   if (!profile) {
     return (
@@ -360,7 +537,13 @@ const VoiceCallSession = () => {
       <div className="container">
         <div className="call-layout">
           <div className="call-stage">
-            <div className="call-header">
+            {connectionError && (
+              <div className="call-banner" role="status">
+                <span className="banner-dot" aria-hidden="true" />
+                <p>{connectionError}</p>
+              </div>
+            )}
+            <header className="call-header">
               <button
                 type="button"
                 className="back-button"
@@ -369,81 +552,143 @@ const VoiceCallSession = () => {
               >
                 ← Back
               </button>
-              <div className="call-status">
-                <span
-                  className={`status-indicator ${isAssistantSpeaking ? 'speaking' : isConnected ? 'listening' : 'disconnected'}`}
-                  aria-hidden="true"
-                />
-                <div>
-                  <p className="status-title">
-                    {isAssistantSpeaking ? `${assistantFirstName} is speaking` : 
-                     isConnected ? 'Live conversation' : 
-                     connectionError ? 'Connection error' : 'Not connected'}
-                  </p>
-                  <p className="status-time">{formatDuration(elapsedSeconds)}</p>
-                </div>
+              <div className="call-header-center">
+                <span className={`status-chip ${statusChipVariant}`}>
+                  <span className="chip-dot" aria-hidden="true" />
+                  {statusTitle}
+                </span>
+                <p className="status-subtitle">{statusSubtitle}</p>
               </div>
               <button type="button" className="end-call-button" onClick={handleEndCall}>
                 End Call
               </button>
-            </div>
+            </header>
 
-            <div className="call-visualizer" role="status" aria-live="polite">
-              <div className={`voice-circle ${isAssistantSpeaking ? 'active' : ''}`}>
-                <div className="pulse-ring ring-1" aria-hidden="true" />
-                <div className="pulse-ring ring-2" aria-hidden="true" />
-                <div className="pulse-ring ring-3" aria-hidden="true" />
-                <div className="avatar-shell">
-                  {profile.avatarUrl && !avatarFailed ? (
-                    <img
-                      src={profile.avatarUrl}
-                      alt={`${assistantName} avatar`}
-                      onError={() => setAvatarFailed(true)}
-                    />
+            <div className="call-body">
+              <div
+                className={`assistant-visual ${isRecording ? 'is-listening' : ''} ${
+                  isAssistantSpeaking ? 'is-speaking' : ''
+                }`}
+                role="status"
+                aria-live="polite"
+              >
+                <div className="assistant-orb">
+                  <div className="orb-ring ring-1" aria-hidden="true" />
+                  <div className="orb-ring ring-2" aria-hidden="true" />
+                  <div className="orb-ring ring-3" aria-hidden="true" />
+                  <div className="assistant-avatar">
+                    {profile.avatarUrl && !avatarFailed ? (
+                      <img
+                        src={profile.avatarUrl}
+                        alt={`${assistantName} avatar`}
+                        onError={() => setAvatarFailed(true)}
+                      />
+                    ) : (
+                      <span>{profile.avatar}</span>
+                    )}
+                  </div>
+                  <div className="assistant-eq" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                </div>
+                <div className="assistant-details">
+                  <span className="call-timer-label">Call duration</span>
+                  <span className="call-timer">{formattedDuration}</span>
+                  <h1>{assistantName}</h1>
+                  {profile.title && <p>{profile.title}</p>}
+                </div>
+              </div>
+
+              <div className="conversation-feed">
+                <div className="feed-header">
+                  <div>
+                    <p className="feed-title">Live conversation</p>
+                    <p className="feed-status">{statusSubtitle}</p>
+                  </div>
+                  <div className={`feed-badge ${isConnected ? 'active' : ''}`}>
+                    <span className="badge-dot" aria-hidden="true" />
+                    <span>{isConnected ? 'On call' : 'Connecting'}</span>
+                  </div>
+                </div>
+                <div className="feed-body">
+                  {conversationMessages.length === 0 ? (
+                    <div className="feed-placeholder">
+                      <LoadingSpinner size="small" />
+                      <p>Start speaking to see your dialogue unfold.</p>
+                    </div>
                   ) : (
-                    <span>{profile.avatar}</span>
+                    conversationMessages.map((line, index) => {
+                      const role =
+                        line.speaker === 'You'
+                          ? 'user'
+                          : line.speaker === assistantName
+                          ? 'assistant'
+                          : 'system';
+
+                      return (
+                        <div
+                          key={`${line.speaker}-${index}`}
+                          className={`conversation-bubble ${role}`}
+                        >
+                          <div className="bubble-meta">
+                            <span className="bubble-speaker">
+                              {line.speaker === assistantName ? assistantFirstName : line.speaker}
+                            </span>
+                            {line.timestamp && (
+                              <span className="bubble-time">
+                                {line.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            )}
+                          </div>
+                          <p>{line.text}</p>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
-                <div className="equalizer" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
-
-              <div className="assistant-meta">
-                <h1>{assistantName}</h1>
-                {profile.title && <p>{profile.title}</p>}
-              </div>
-
-              <div className="call-controls">
-                {!isRecording ? (
-                  <button
-                    type="button"
-                    className="control-btn start"
-                    onClick={startVoiceChat}
-                    disabled={isProcessing || connectionError}
-                  >
-                    {isProcessing ? 'Processing...' : 
-                     connectionError ? 'Connection Error' :
-                     !isConnected ? 'Connect & Start' : 'Start Voice Chat'}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="control-btn stop"
-                    onClick={stopVoiceChat}
-                  >
-                    Stop Recording
-                  </button>
-                )}
-                <button type="button" className="control-btn end" onClick={handleEndCall}>
-                  End call
-                </button>
               </div>
             </div>
+
+            <footer className="call-footer">
+              <div className="call-controls">
+                <button
+                  type="button"
+                  className={`mic-button ${isRecording ? 'active' : ''} ${isProcessing ? 'processing' : ''} ${
+                    isAssistantSpeaking ? 'speaking' : ''
+                  }`}
+                  onClick={handleMicToggle}
+                  disabled={micButtonDisabled}
+                  aria-label={micButtonLabel}
+                >
+                  <span className="mic-icon" aria-hidden="true" />
+                </button>
+                <div className="control-panel">
+                  <button
+                    type="button"
+                    className={`pill-button ${autoResumePreference ? 'active' : ''}`}
+                    onClick={toggleAutoResume}
+                  >
+                    {autoResumeLabel}
+                  </button>
+                  <button
+                    type="button"
+                    className="pill-button subtle"
+                    onClick={handleManualPause}
+                    disabled={!isRecording}
+                  >
+                    Pause microphone
+                  </button>
+                </div>
+                <button type="button" className="end-call-button" onClick={handleEndCall}>
+                  End Call
+                </button>
+              </div>
+              <p className="control-hint" role="status">{controlHint}</p>
+            </footer>
           </div>
 
           <aside className="transcription-panel">
@@ -456,7 +701,7 @@ const VoiceCallSession = () => {
               {transcript.length === 0 && (
                 <div className="transcription-placeholder">
                   <LoadingSpinner size="small" />
-                  <p>Ready for voice conversation. Click "Start Voice Chat" to begin.</p>
+                  <p>Ready when you are. Tap the microphone to begin the conversation.</p>
                 </div>
               )}
 
@@ -464,15 +709,18 @@ const VoiceCallSession = () => {
                 <div
                   key={`${line.speaker}-${index}`}
                   className={`transcription-line ${
-                    line.speaker === 'You' ? 'user-line' : 
-                    line.speaker === assistantName ? 'assistant-line' : 'system-line'
+                    line.speaker === 'You'
+                      ? 'user-line'
+                      : line.speaker === assistantName
+                      ? 'assistant-line'
+                      : 'system-line'
                   }`}
                 >
                   <span className="speaker">{line.speaker}</span>
                   <span className="text">{line.text}</span>
                   {line.timestamp && (
                     <span className="timestamp">
-                      {line.timestamp.toLocaleTimeString()}
+                      {line.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   )}
                 </div>
@@ -506,276 +754,595 @@ const VoiceCallSession = () => {
       </div>
 
       <style jsx>{`
+
         .voice-call-page {
           padding: var(--space-12) 0;
           min-height: calc(100vh - 80px);
-          background: radial-gradient(circle at top, rgba(67, 97, 238, 0.1), transparent 55%),
-            var(--gray-50);
+          background: radial-gradient(circle at top, rgba(67, 97, 238, 0.16), transparent 58%),
+            linear-gradient(180deg, #f6f7ff 0%, #f9fafc 35%, #ffffff 100%);
         }
 
         .call-layout {
           display: grid;
-          grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+          grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
           gap: var(--space-8);
+          align-items: stretch;
         }
 
         .call-stage {
-          background: rgba(255, 255, 255, 0.92);
-          border-radius: var(--radius-3xl);
-          padding: var(--space-8);
-          box-shadow: var(--shadow-xl);
-          backdrop-filter: blur(12px);
+          position: relative;
           display: flex;
           flex-direction: column;
-          justify-content: space-between;
+          gap: var(--space-8);
+          padding: var(--space-8);
+          border-radius: 32px;
+          background: linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(237, 242, 255, 0.96));
+          box-shadow: 0 30px 60px rgba(15, 23, 42, 0.14);
+          backdrop-filter: blur(18px);
+        }
+
+        .call-banner {
+          display: inline-flex;
+          align-items: center;
+          gap: var(--space-3);
+          padding: var(--space-3) var(--space-4);
+          border-radius: var(--radius-2xl);
+          background: rgba(244, 63, 94, 0.12);
+          color: var(--error-500);
+          font-size: var(--text-sm);
+          box-shadow: inset 0 0 0 1px rgba(244, 63, 94, 0.2);
+        }
+
+        .banner-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: currentColor;
+          box-shadow: 0 0 0 4px rgba(244, 63, 94, 0.2);
         }
 
         .call-header {
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          margin-bottom: var(--space-10);
+          align-items: flex-start;
           gap: var(--space-4);
         }
 
         .back-button {
           border: none;
-          background: transparent;
+          background: rgba(67, 97, 238, 0.12);
           color: var(--primary-600);
           font-weight: var(--font-weight-medium);
           cursor: pointer;
-          font-size: var(--text-base);
-          padding: var(--space-2) var(--space-3);
-          border-radius: var(--radius-lg);
-          transition: background var(--transition-fast);
+          font-size: var(--text-sm);
+          padding: var(--space-3) var(--space-4);
+          border-radius: 999px;
+          transition: transform var(--transition-fast), box-shadow var(--transition-fast);
         }
 
         .back-button:hover {
-          background: rgba(67, 97, 238, 0.08);
+          transform: translateY(-1px);
+          box-shadow: var(--shadow-sm);
         }
 
-        .call-status {
+        .call-header-center {
+          flex: 1;
           display: flex;
+          flex-direction: column;
           align-items: center;
-          gap: var(--space-3);
+          gap: var(--space-2);
+          text-align: center;
         }
 
-        .status-indicator {
-          width: 14px;
-          height: 14px;
-          border-radius: 50%;
-          box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.2);
-          background: var(--success-500);
-          animation: pulse-soft 1.6s infinite ease-in-out;
-        }
-
-        .status-indicator.listening {
-          background: var(--primary-500);
-          box-shadow: 0 0 0 6px rgba(67, 97, 238, 0.18);
-        }
-
-        .status-indicator.disconnected {
-          background: var(--gray-400);
-          box-shadow: 0 0 0 6px rgba(156, 163, 175, 0.18);
-          animation: none;
-        }
-
-        .status-title {
-          font-size: var(--text-lg);
+        .status-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: var(--space-2);
+          padding: var(--space-2) var(--space-4);
+          border-radius: 999px;
           font-weight: var(--font-weight-semibold);
+          font-size: var(--text-sm);
+          letter-spacing: 0.02em;
+          text-transform: uppercase;
+        }
+
+        .status-chip .chip-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          background: currentColor;
+        }
+
+        .status-chip.ready {
+          background: rgba(15, 23, 42, 0.06);
           color: var(--gray-900);
         }
 
-        .status-time {
+        .status-chip.listening {
+          background: rgba(67, 97, 238, 0.16);
+          color: var(--primary-600);
+        }
+
+        .status-chip.processing {
+          background: rgba(251, 191, 36, 0.18);
+          color: var(--warning-500);
+        }
+
+        .status-chip.speaking {
+          background: rgba(16, 185, 129, 0.18);
+          color: var(--success-500);
+        }
+
+        .status-chip.disconnected {
+          background: rgba(148, 163, 184, 0.2);
+          color: var(--gray-600);
+        }
+
+        .status-subtitle {
           color: var(--gray-600);
           font-size: var(--text-sm);
         }
 
-        .end-call-button {
-          background: var(--error-500);
-          color: var(--white);
-          border: none;
-          border-radius: var(--radius-lg);
-          padding: var(--space-3) var(--space-4);
-          font-weight: var(--font-weight-semibold);
-          cursor: pointer;
-          box-shadow: var(--shadow-sm);
-          transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+        .call-body {
+          display: grid;
+          grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+          gap: var(--space-8);
+          align-items: center;
         }
 
-        .end-call-button:hover {
-          transform: translateY(-1px);
-          box-shadow: var(--shadow-md);
-        }
-
-        .call-visualizer {
+        .assistant-visual {
           display: flex;
           flex-direction: column;
           align-items: center;
+          gap: var(--space-6);
           text-align: center;
-          gap: var(--space-8);
         }
 
-        .voice-circle {
+        .assistant-orb {
           position: relative;
-          width: clamp(240px, 35vw, 360px);
-          height: clamp(240px, 35vw, 360px);
+          width: clamp(240px, 32vw, 360px);
+          height: clamp(240px, 32vw, 360px);
           border-radius: 50%;
           display: grid;
           place-items: center;
-          background: linear-gradient(145deg, rgba(67, 97, 238, 0.35), rgba(63, 55, 201, 0.15));
+          background: radial-gradient(circle at 30% 30%, rgba(67, 97, 238, 0.45), rgba(67, 97, 238, 0.1));
+          box-shadow: inset 0 -20px 60px rgba(59, 130, 246, 0.25), 0 28px 60px rgba(67, 97, 238, 0.25);
           overflow: hidden;
         }
 
-        .voice-circle.active .pulse-ring {
+        .assistant-orb::after {
+          content: '';
+          position: absolute;
+          inset: 12%;
+          border-radius: 50%;
+          background: radial-gradient(circle, rgba(255, 255, 255, 0.4), transparent 70%);
+          opacity: 0.6;
+        }
+
+        .assistant-visual.is-listening .orb-ring,
+        .assistant-visual.is-speaking .orb-ring {
           opacity: 1;
           transform: scale(1);
         }
 
-        .pulse-ring {
+        .orb-ring {
           position: absolute;
           width: 100%;
           height: 100%;
           border-radius: 50%;
-          border: 2px solid rgba(67, 97, 238, 0.45);
+          border: 2px solid rgba(67, 97, 238, 0.3);
+          transform: scale(0.82);
           opacity: 0;
-          transform: scale(0.85);
-          transition: transform 0.8s ease, opacity 0.8s ease;
+          transition: opacity 0.6s ease, transform 0.6s ease;
         }
 
-        .voice-circle.active .ring-1 {
-          animation: ripple 2.4s infinite;
+        .assistant-visual.is-listening .ring-1,
+        .assistant-visual.is-speaking .ring-1 {
+          animation: ripple 3s infinite;
         }
 
-        .voice-circle.active .ring-2 {
-          animation: ripple 2.4s infinite 0.4s;
+        .assistant-visual.is-listening .ring-2,
+        .assistant-visual.is-speaking .ring-2 {
+          animation: ripple 3s infinite 0.6s;
         }
 
-        .voice-circle.active .ring-3 {
-          animation: ripple 2.4s infinite 0.8s;
+        .assistant-visual.is-listening .ring-3,
+        .assistant-visual.is-speaking .ring-3 {
+          animation: ripple 3s infinite 1.2s;
         }
 
-        .avatar-shell {
+        .assistant-avatar {
           position: relative;
           width: clamp(140px, 20vw, 200px);
           height: clamp(140px, 20vw, 200px);
           border-radius: 50%;
           display: grid;
           place-items: center;
-          background: var(--white);
-          box-shadow: inset 0 0 0 4px rgba(67, 97, 238, 0.15);
+          background: rgba(255, 255, 255, 0.9);
+          box-shadow: inset 0 0 0 4px rgba(67, 97, 238, 0.18);
           overflow: hidden;
+          z-index: 1;
         }
 
-        .avatar-shell span {
-          font-size: clamp(48px, 7vw, 72px);
+        .assistant-avatar span {
+          font-size: clamp(48px, 8vw, 72px);
           font-weight: var(--font-weight-semibold);
-          color: var(--primary-500);
+          color: var(--primary-600);
         }
 
-        .avatar-shell img {
+        .assistant-avatar img {
           width: 100%;
           height: 100%;
           object-fit: cover;
         }
 
-        .equalizer {
+        .assistant-eq {
           position: absolute;
-          bottom: 30px;
+          bottom: 18%;
           display: flex;
           gap: 6px;
+          z-index: 1;
         }
 
-        .equalizer span {
-          width: 6px;
+        .assistant-eq span {
+          width: 7px;
           height: 32px;
           border-radius: 999px;
-          background: rgba(255, 255, 255, 0.8);
-          animation: equalize 1.3s infinite ease-in-out;
+          background: rgba(255, 255, 255, 0.9);
+          transform-origin: bottom center;
+          animation: equalize 1.6s infinite ease-in-out;
+          opacity: 0.6;
         }
 
-        .voice-circle:not(.active) .equalizer span {
+        .assistant-visual:not(.is-speaking) .assistant-eq span {
           animation-play-state: paused;
-          opacity: 0.35;
+          opacity: 0.3;
         }
 
-        .equalizer span:nth-child(2) {
+        .assistant-eq span:nth-child(2) {
           animation-delay: 0.2s;
         }
 
-        .equalizer span:nth-child(3) {
+        .assistant-eq span:nth-child(3) {
           animation-delay: 0.4s;
         }
 
-        .equalizer span:nth-child(4) {
+        .assistant-eq span:nth-child(4) {
           animation-delay: 0.6s;
         }
 
-        .equalizer span:nth-child(5) {
+        .assistant-eq span:nth-child(5) {
           animation-delay: 0.8s;
         }
 
-        .assistant-meta h1 {
+        .assistant-details {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: var(--space-2);
+        }
+
+        .call-timer-label {
+          font-size: var(--text-xs);
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: var(--gray-500);
+        }
+
+        .call-timer {
+          font-variant-numeric: tabular-nums;
+          font-size: clamp(26px, 3vw, 36px);
+          font-weight: var(--font-weight-semibold);
+          color: var(--gray-900);
+        }
+
+        .assistant-details h1 {
           font-size: clamp(28px, 3vw, 40px);
           font-weight: var(--font-weight-semibold);
           color: var(--gray-900);
         }
 
-        .assistant-meta p {
+        .assistant-details p {
           color: var(--gray-600);
-          margin-top: var(--space-2);
+          font-size: var(--text-sm);
+        }
+
+        .conversation-feed {
+          position: relative;
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-5);
+          padding: var(--space-6);
+          border-radius: var(--radius-3xl);
+          background: rgba(15, 23, 42, 0.92);
+          color: var(--white);
+          box-shadow: 0 24px 60px rgba(15, 23, 42, 0.4);
+          overflow: hidden;
+        }
+
+        .conversation-feed::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(160deg, rgba(59, 130, 246, 0.25), transparent 55%);
+          pointer-events: none;
+        }
+
+        .feed-header,
+        .feed-body {
+          position: relative;
+          z-index: 1;
+        }
+
+        .feed-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: var(--space-4);
+        }
+
+        .feed-title {
+          font-size: var(--text-lg);
+          font-weight: var(--font-weight-semibold);
+        }
+
+        .feed-status {
+          font-size: var(--text-sm);
+          color: rgba(255, 255, 255, 0.68);
+          margin-top: var(--space-1);
+        }
+
+        .feed-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: var(--space-2);
+          padding: var(--space-2) var(--space-3);
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.12);
+          font-size: var(--text-xs);
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+
+        .feed-badge.active {
+          background: rgba(16, 185, 129, 0.2);
+          color: var(--white);
+        }
+
+        .badge-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: currentColor;
+          box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18);
+        }
+
+        .feed-body {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-4);
+          max-height: 380px;
+          overflow-y: auto;
+          padding-right: var(--space-1);
+        }
+
+        .feed-body::-webkit-scrollbar {
+          width: 6px;
+        }
+
+        .feed-body::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.16);
+          border-radius: 999px;
+        }
+
+        .feed-placeholder {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: var(--space-3);
+          color: rgba(255, 255, 255, 0.75);
+          text-align: center;
+        }
+
+        .conversation-bubble {
+          padding: var(--space-4);
+          border-radius: var(--radius-2xl);
+          background: rgba(255, 255, 255, 0.08);
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-2);
+          backdrop-filter: blur(4px);
+        }
+
+        .conversation-bubble.user {
+          align-self: flex-end;
+          background: rgba(96, 165, 250, 0.22);
+        }
+
+        .conversation-bubble.assistant {
+          border: 1px solid rgba(148, 197, 255, 0.22);
+        }
+
+        .conversation-bubble.system {
+          font-style: italic;
+          color: rgba(255, 255, 255, 0.7);
+          background: rgba(148, 163, 184, 0.2);
+        }
+
+        .bubble-meta {
+          display: flex;
+          justify-content: space-between;
+          font-size: var(--text-xs);
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: rgba(255, 255, 255, 0.6);
+        }
+
+        .bubble-speaker {
+          font-weight: var(--font-weight-medium);
+        }
+
+        .bubble-time {
+          font-variant-numeric: tabular-nums;
+        }
+
+        .conversation-bubble p {
+          font-size: var(--text-base);
+          line-height: 1.55;
+          color: rgba(255, 255, 255, 0.92);
+        }
+
+        .call-footer {
+          display: flex;
+          flex-direction: column;
+          gap: var(--space-4);
         }
 
         .call-controls {
           display: flex;
+          align-items: center;
+          justify-content: space-between;
           gap: var(--space-4);
+          flex-wrap: wrap;
         }
 
-        .control-btn {
+        .mic-button {
+          width: 96px;
+          height: 96px;
+          border-radius: 50%;
           border: none;
-          border-radius: var(--radius-xl);
-          padding: var(--space-3) var(--space-6);
+          display: grid;
+          place-items: center;
+          background: linear-gradient(145deg, rgba(67, 97, 238, 0.95), rgba(88, 28, 135, 0.85));
+          color: var(--white);
+          box-shadow: 0 22px 45px rgba(59, 130, 246, 0.35);
+          cursor: pointer;
+          transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
+        }
+
+        .mic-button:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: 0 28px 60px rgba(59, 130, 246, 0.45);
+        }
+
+        .mic-button:disabled {
+          cursor: not-allowed;
+          opacity: 0.6;
+          box-shadow: none;
+        }
+
+        .mic-button.active {
+          background: linear-gradient(145deg, rgba(16, 185, 129, 0.95), rgba(21, 128, 61, 0.85));
+          box-shadow: 0 26px 52px rgba(16, 185, 129, 0.45);
+        }
+
+        .mic-button.processing {
+          background: linear-gradient(145deg, rgba(251, 191, 36, 0.9), rgba(217, 119, 6, 0.85));
+          box-shadow: 0 26px 52px rgba(217, 119, 6, 0.35);
+        }
+
+        .mic-button.speaking {
+          background: linear-gradient(145deg, rgba(99, 102, 241, 0.95), rgba(14, 116, 144, 0.85));
+        }
+
+        .mic-icon {
+          position: relative;
+          width: 20px;
+          height: 28px;
+          background: var(--white);
+          border-radius: 10px;
+        }
+
+        .mic-icon::before {
+          content: '';
+          position: absolute;
+          left: 50%;
+          bottom: -8px;
+          transform: translateX(-50%);
+          width: 32px;
+          height: 14px;
+          border: 2px solid rgba(255, 255, 255, 0.75);
+          border-top: none;
+          border-radius: 0 0 18px 18px;
+        }
+
+        .mic-icon::after {
+          content: '';
+          position: absolute;
+          left: 50%;
+          bottom: -18px;
+          transform: translateX(-50%);
+          width: 4px;
+          height: 12px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.75);
+        }
+
+        .control-panel {
+          display: flex;
+          gap: var(--space-3);
+          flex-wrap: wrap;
+        }
+
+        .pill-button {
+          border: none;
+          border-radius: 999px;
+          padding: var(--space-2) var(--space-4);
+          font-size: var(--text-sm);
           font-weight: var(--font-weight-medium);
           cursor: pointer;
-          transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-          background: rgba(67, 97, 238, 0.12);
+          background: rgba(67, 97, 238, 0.15);
           color: var(--primary-600);
+          transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
         }
 
-        .control-btn.muted {
+        .pill-button.active {
+          background: rgba(16, 185, 129, 0.18);
+          color: var(--success-500);
+          box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.35);
+        }
+
+        .pill-button.subtle {
           background: rgba(15, 23, 42, 0.08);
-          color: var(--gray-800);
+          color: var(--gray-700);
         }
 
-        .control-btn.start {
-          background: var(--success-500);
-          color: var(--white);
+        .pill-button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
         }
 
-        .control-btn.stop {
-          background: var(--warning-500);
-          color: var(--white);
-        }
-
-        .control-btn.end {
+        .end-call-button {
           background: var(--error-500);
           color: var(--white);
+          border: none;
+          border-radius: 999px;
+          padding: var(--space-3) var(--space-5);
+          font-weight: var(--font-weight-semibold);
+          cursor: pointer;
+          box-shadow: 0 20px 40px rgba(239, 68, 68, 0.35);
+          transition: transform var(--transition-fast), box-shadow var(--transition-fast);
         }
 
-        .control-btn:hover {
-          transform: translateY(-1px);
-          box-shadow: var(--shadow-sm);
+        .end-call-button:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 24px 52px rgba(239, 68, 68, 0.45);
+        }
+
+        .control-hint {
+          font-size: var(--text-sm);
+          color: var(--gray-600);
         }
 
         .transcription-panel {
-          background: rgba(15, 23, 42, 0.9);
+          background: rgba(15, 23, 42, 0.92);
           color: var(--white);
           border-radius: var(--radius-3xl);
           padding: var(--space-6);
           display: flex;
           flex-direction: column;
           gap: var(--space-5);
-          box-shadow: var(--shadow-xl);
+          box-shadow: 0 24px 60px rgba(15, 23, 42, 0.45);
           position: relative;
           overflow: hidden;
         }
@@ -784,12 +1351,14 @@ const VoiceCallSession = () => {
           content: '';
           position: absolute;
           inset: 0;
-          background: linear-gradient(160deg, rgba(59, 130, 246, 0.15), transparent 45%);
+          background: linear-gradient(180deg, rgba(59, 130, 246, 0.12), transparent 55%);
           pointer-events: none;
         }
 
-        .transcription-header {
+        .transcription-header,
+        .transcription-body {
           position: relative;
+          z-index: 1;
         }
 
         .transcription-header h2 {
@@ -804,15 +1373,23 @@ const VoiceCallSession = () => {
         }
 
         .transcription-body {
-          position: relative;
           background: rgba(15, 23, 42, 0.75);
           border-radius: var(--radius-2xl);
           padding: var(--space-5);
           overflow-y: auto;
-          max-height: 480px;
+          max-height: 520px;
           display: flex;
           flex-direction: column;
           gap: var(--space-4);
+        }
+
+        .transcription-body::-webkit-scrollbar {
+          width: 6px;
+        }
+
+        .transcription-body::-webkit-scrollbar-thumb {
+          background: rgba(148, 197, 255, 0.28);
+          border-radius: 999px;
         }
 
         .transcription-placeholder {
@@ -821,6 +1398,7 @@ const VoiceCallSession = () => {
           align-items: center;
           gap: var(--space-3);
           color: rgba(255, 255, 255, 0.75);
+          text-align: center;
         }
 
         .transcription-line {
@@ -842,37 +1420,22 @@ const VoiceCallSession = () => {
           color: rgba(255, 255, 255, 0.9);
         }
 
-        .user-line .text {
+        .transcription-line.user-line .text {
           color: rgba(148, 197, 255, 0.92);
         }
 
-        .transcription-line.listening .speaker {
-          color: rgba(148, 197, 255, 0.85);
+        .transcription-line.system-line .text {
+          color: rgba(255, 255, 255, 0.7);
+          font-style: italic;
         }
 
-        .listening-indicator {
-          display: inline-flex;
-          gap: 6px;
-          align-items: center;
+        .timestamp {
+          font-size: var(--text-xs);
+          color: rgba(255, 255, 255, 0.4);
         }
 
-        .listening-indicator span {
-          width: 8px;
-          height: 8px;
-          border-radius: 999px;
-          background: rgba(148, 197, 255, 0.85);
-          animation: bounce 0.9s infinite ease-in-out;
-        }
-
-        .listening-indicator span:nth-child(2) {
-          animation-delay: 0.15s;
-        }
-
-        .listening-indicator span:nth-child(3) {
-          animation-delay: 0.3s;
-        }
-
-        .recording-indicator {
+        .recording-indicator,
+        .processing-indicator {
           display: inline-flex;
           gap: 4px;
           align-items: center;
@@ -880,10 +1443,10 @@ const VoiceCallSession = () => {
 
         .recording-indicator span {
           width: 6px;
-          height: 6px;
+          height: 16px;
           border-radius: 999px;
-          background: var(--error-500);
-          animation: pulse-recording 0.8s infinite ease-in-out;
+          background: rgba(239, 68, 68, 0.85);
+          animation: pulse-recording 1.1s infinite ease-in-out;
         }
 
         .recording-indicator span:nth-child(2) {
@@ -898,46 +1461,52 @@ const VoiceCallSession = () => {
           animation-delay: 0.6s;
         }
 
-        .processing-indicator {
-          display: inline-flex;
-          gap: 4px;
-          align-items: center;
-        }
-
         .processing-indicator span {
           width: 6px;
           height: 6px;
           border-radius: 999px;
-          background: var(--primary-500);
+          background: rgba(96, 165, 250, 0.85);
           animation: pulse-processing 1.2s infinite ease-in-out;
         }
 
         .processing-indicator span:nth-child(2) {
-          animation-delay: 0.3s;
+          animation-delay: 0.25s;
         }
 
         .processing-indicator span:nth-child(3) {
-          animation-delay: 0.6s;
+          animation-delay: 0.5s;
         }
 
-        .system-line .text {
-          color: rgba(255, 255, 255, 0.7);
-          font-style: italic;
+        @keyframes ripple {
+          0% {
+            transform: scale(0.75);
+            opacity: 0.9;
+          }
+          60% {
+            opacity: 0;
+          }
+          100% {
+            transform: scale(1.25);
+            opacity: 0;
+          }
         }
 
-        .timestamp {
-          font-size: var(--text-xs);
-          color: rgba(255, 255, 255, 0.4);
-          margin-left: var(--space-2);
+        @keyframes equalize {
+          0%, 100% {
+            transform: scaleY(0.45);
+          }
+          50% {
+            transform: scaleY(1);
+          }
         }
 
         @keyframes pulse-recording {
           0%, 100% {
-            transform: scale(0.8);
-            opacity: 0.6;
+            transform: scaleY(0.5);
+            opacity: 0.5;
           }
           50% {
-            transform: scale(1.2);
+            transform: scaleY(1);
             opacity: 1;
           }
         }
@@ -953,54 +1522,6 @@ const VoiceCallSession = () => {
           }
         }
 
-        @keyframes ripple {
-          0% {
-            transform: scale(0.75);
-            opacity: 0.75;
-          }
-          70% {
-            opacity: 0;
-          }
-          100% {
-            transform: scale(1.25);
-            opacity: 0;
-          }
-        }
-
-        @keyframes equalize {
-          0%,
-          100% {
-            transform: scaleY(0.45);
-          }
-          50% {
-            transform: scaleY(1);
-          }
-        }
-
-        @keyframes pulse-soft {
-          0%,
-          100% {
-            transform: scale(0.9);
-            opacity: 0.75;
-          }
-          50% {
-            transform: scale(1);
-            opacity: 1;
-          }
-        }
-
-        @keyframes bounce {
-          0%,
-          100% {
-            transform: translateY(0);
-            opacity: 0.6;
-          }
-          50% {
-            transform: translateY(-4px);
-            opacity: 1;
-          }
-        }
-
         @media (max-width: 1200px) {
           .call-layout {
             grid-template-columns: 1fr;
@@ -1008,6 +1529,10 @@ const VoiceCallSession = () => {
 
           .transcription-panel {
             order: -1;
+          }
+
+          .call-body {
+            grid-template-columns: 1fr;
           }
         }
 
@@ -1020,28 +1545,32 @@ const VoiceCallSession = () => {
             padding: var(--space-6);
           }
 
-          .call-header {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: var(--space-4);
-          }
-
-          .call-visualizer {
-            gap: var(--space-6);
-          }
-
           .call-controls {
             flex-direction: column;
+            align-items: stretch;
+          }
+
+          .control-panel {
+            justify-content: space-between;
             width: 100%;
           }
 
-          .control-btn {
+          .end-call-button {
             width: 100%;
-            justify-content: center;
+            text-align: center;
+          }
+
+          .conversation-feed {
+            padding: var(--space-5);
+          }
+
+          .mic-button {
+            width: 80px;
+            height: 80px;
           }
         }
       `}</style>
-    </div>
+
   );
 };
 
