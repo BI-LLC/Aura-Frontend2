@@ -3,8 +3,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+
 import { useAuth } from '../../context/AuthContext';
-// import voiceService from '../../services/voiceService'; // Currently unused
 import LoadingSpinner from '../common/LoadingSpinner';
 
 const formatDuration = (seconds) => {
@@ -25,20 +25,19 @@ const VoiceCallSession = () => {
   const navigationProfile = location.state?.profile || null;
 
   const [profile] = useState(navigationProfile);
-  // const [isMuted, setIsMuted] = useState(false); // Currently unused
+  const [isMuted, setIsMuted] = useState(false);
   const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [transcript, setTranscript] = useState([]);
-  const [avatarFailed, setAvatarFailed] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [transcript, setTranscript] = useState([]);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const transcriptRef = useRef(null);
   const websocketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const { user, getToken, isAuthenticated } = useAuth();
+  const { getToken } = useAuth();
 
   const assistantName = profile?.name || 'Aura Assistant';
   const assistantFirstName = useMemo(
@@ -46,22 +45,56 @@ const VoiceCallSession = () => {
     [assistantName]
   );
 
+  const connectionLabel = useMemo(() => {
+    if (connectionError) {
+      return connectionError;
+    }
+    if (isAssistantSpeaking) {
+      return `${assistantFirstName} is speaking`;
+    }
+    if (isRecording) {
+      return 'Live conversation';
+    }
+    if (isConnected) {
+      return 'Connected';
+    }
+    return 'Ready to connect';
+  }, [assistantFirstName, connectionError, isAssistantSpeaking, isConnected, isRecording]);
+
+  const connectionTone = useMemo(() => {
+    if (connectionError) {
+      return 'error';
+    }
+    if (isAssistantSpeaking) {
+      return 'speaking';
+    }
+    if (isRecording) {
+      return 'listening';
+    }
+    if (isConnected) {
+      return 'connected';
+    }
+    return 'idle';
+  }, [connectionError, isAssistantSpeaking, isConnected, isRecording]);
+
   useEffect(() => {
-    if (!profile) {
-      return;
+    if (!isConnected) {
+      return undefined;
     }
 
     setElapsedSeconds(0);
-    setAvatarFailed(false);
     const timer = setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [profile]);
+  }, [isConnected]);
 
-  // Simple WebSocket connection for voice conversation
   const connectWebSocket = async () => {
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      return true;
+    }
+
     const rawToken = getToken && typeof getToken === 'function' ? getToken() : null;
     if (!rawToken) {
       setConnectionError('Authentication required. Please log in.');
@@ -69,56 +102,66 @@ const VoiceCallSession = () => {
     }
 
     try {
-      // Ensure token is properly formatted
       const token = rawToken.startsWith('Bearer ') ? rawToken.slice(7) : rawToken;
-      const wsUrl = `wss://api.iaura.ai/ws/voice/continuous?token=${encodeURIComponent(token)}`;
-      console.log('Connecting to WebSocket:', wsUrl);
-      console.log('User token:', token ? 'Present' : 'Missing');
-      const ws = new WebSocket(wsUrl);
-      
+      const wsUrl = new URL('wss://api.iaura.ai/ws/voice/continuous');
+      wsUrl.searchParams.set('token', token);
+      if (slug) {
+        wsUrl.searchParams.set('slug', slug);
+      }
+
+      const ws = new WebSocket(wsUrl.toString());
       websocketRef.current = ws;
 
       ws.onopen = () => {
-        console.log('WebSocket connected');
         setIsConnected(true);
         setConnectionError(null);
-        setTranscript(prev => [...prev, {
-          speaker: 'System',
-          text: 'Connected to AI assistant. You can start speaking.',
-          timestamp: new Date()
-        }]);
+        setTranscript((prev) => [
+          ...prev,
+          {
+            speaker: 'System',
+            text: 'Connected to AI assistant. You can start speaking.',
+            timestamp: new Date(),
+          },
+        ]);
       };
 
       ws.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('WebSocket message:', data.type);
 
           switch (data.type) {
             case 'user_transcript':
-              setTranscript(prev => [...prev, {
-                speaker: 'You',
-                text: data.text,
-                timestamp: new Date()
-              }]);
+              setTranscript((prev) => [
+                ...prev,
+                {
+                  speaker: 'You',
+                  text: data.text,
+                  timestamp: new Date(),
+                },
+              ]);
               break;
-
             case 'ai_audio':
               if (data.audio) {
                 try {
-                  const audioBlob = new Blob([Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))], { type: 'audio/mpeg' });
+                  const audioBlob = new Blob(
+                    [Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0))],
+                    { type: 'audio/mpeg' }
+                  );
                   const audioUrl = URL.createObjectURL(audioBlob);
                   const audio = new Audio(audioUrl);
-                  
+
                   setIsAssistantSpeaking(true);
                   await audio.play();
-                  
-                  setTranscript(prev => [...prev, {
-                    speaker: assistantName,
-                    text: data.text || 'AI responded',
-                    timestamp: new Date()
-                  }]);
-                  
+
+                  setTranscript((prev) => [
+                    ...prev,
+                    {
+                      speaker: assistantName,
+                      text: data.text || 'AI responded',
+                      timestamp: new Date(),
+                    },
+                  ]);
+
                   audio.onended = () => {
                     setIsAssistantSpeaking(false);
                     URL.revokeObjectURL(audioUrl);
@@ -128,28 +171,19 @@ const VoiceCallSession = () => {
                 }
               }
               break;
-
             case 'error':
-              console.error('WebSocket error:', data.message);
               setConnectionError(data.message);
-              setTranscript(prev => [...prev, {
-                speaker: 'System',
-                text: `Error: ${data.message}`,
-                timestamp: new Date()
-              }]);
-              
-              // Handle authentication errors specifically
-              if (data.message.includes('token') || data.message.includes('auth')) {
-                setTranscript(prev => [...prev, {
+              setTranscript((prev) => [
+                ...prev,
+                {
                   speaker: 'System',
-                  text: 'Authentication failed. Please log out and log back in.',
-                  timestamp: new Date()
-                }]);
-              }
+                  text: `Error: ${data.message}`,
+                  timestamp: new Date(),
+                },
+              ]);
               break;
-
             default:
-              console.log('Unknown message type:', data.type);
+              break;
           }
         } catch (parseError) {
           console.error('Message parse error:', parseError);
@@ -157,7 +191,6 @@ const VoiceCallSession = () => {
       };
 
       ws.onclose = (event) => {
-        console.log('WebSocket closed:', event.code);
         setIsConnected(false);
         setIsRecording(false);
         if (event.code !== 1000) {
@@ -165,8 +198,7 @@ const VoiceCallSession = () => {
         }
       };
 
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+      ws.onerror = () => {
         setConnectionError('Connection failed');
         setIsConnected(false);
       };
@@ -179,92 +211,100 @@ const VoiceCallSession = () => {
     }
   };
 
-  // Start continuous voice conversation
   const startVoiceChat = async () => {
     if (!profile || isRecording || isProcessing) return;
 
     try {
-      // First, connect to WebSocket if not already connected
       if (!isConnected) {
         const connected = await connectWebSocket();
         if (!connected) return;
       }
 
-      // Get microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
-        } 
+          autoGainControl: true,
+        },
       });
 
-      // Create MediaRecorder for continuous audio streaming
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
+        mimeType: 'audio/webm;codecs=opus',
       });
 
       mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0 && websocketRef.current?.readyState === WebSocket.OPEN) {
-          // Convert blob to base64 and send through WebSocket
+        if (
+          event.data.size > 0 &&
+          websocketRef.current?.readyState === WebSocket.OPEN &&
+          !isMuted
+        ) {
           const reader = new FileReader();
           reader.onload = () => {
             const base64 = reader.result.split(',')[1];
-            websocketRef.current.send(JSON.stringify({
-              type: 'audio_chunk',
-              audio: base64
-            }));
+            websocketRef.current.send(
+              JSON.stringify({
+                type: 'audio_chunk',
+                audio: base64,
+              })
+            );
           };
           reader.readAsDataURL(event.data);
         }
       };
 
       mediaRecorder.onstop = () => {
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach((track) => track.stop());
       };
 
-      // Start recording with small chunks for real-time streaming
-      mediaRecorder.start(250); // Send data every 250ms
+      mediaRecorder.start(250);
       setIsRecording(true);
       setIsProcessing(false);
-      
-      // Add user message to transcript
-      setTranscript(prev => [...prev, {
-        speaker: 'You',
-        text: '🎤 Recording...',
-        timestamp: new Date()
-      }]);
+      setIsMuted(false);
 
-      console.log('Continuous voice conversation started');
-
+      setTranscript((prev) => [
+        ...prev,
+        {
+          speaker: 'System',
+          text: '🎤 Microphone active. Speak freely to your assistant.',
+          timestamp: new Date(),
+        },
+      ]);
     } catch (error) {
       console.error('Error starting voice chat:', error);
       setIsRecording(false);
       setIsProcessing(false);
-      setTranscript(prev => [...prev, {
-        speaker: 'System',
-        text: 'Failed to start voice recording. Please check your microphone permissions.',
-        timestamp: new Date()
-      }]);
+      setTranscript((prev) => [
+        ...prev,
+        {
+          speaker: 'System',
+          text: 'Failed to start voice recording. Please check your microphone permissions.',
+          timestamp: new Date(),
+        },
+      ]);
     }
   };
 
-  const stopVoiceChat = async () => {
+  const stopVoiceChat = () => {
     if (!isRecording) return;
-    
-    // Stop media recorder
+
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
     }
-    
+
     setIsRecording(false);
     setIsProcessing(true);
+    setTranscript((prev) => [
+      ...prev,
+      {
+        speaker: 'System',
+        text: 'Microphone paused. Tap to resume when you are ready.',
+        timestamp: new Date(),
+      },
+    ]);
   };
 
-  // Cleanup WebSocket connection
   const disconnectWebSocket = () => {
     if (websocketRef.current) {
       websocketRef.current.close();
@@ -274,13 +314,14 @@ const VoiceCallSession = () => {
     setIsRecording(false);
   };
 
-  // Cleanup on component unmount
   useEffect(() => {
     return () => {
-      disconnectWebSocket();
       if (mediaRecorderRef.current) {
-        mediaRecorderRef.current.stop();
+        if (mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.stop();
+        }
       }
+      disconnectWebSocket();
     };
   }, []);
 
@@ -290,10 +331,42 @@ const VoiceCallSession = () => {
     }
   }, [transcript]);
 
+  const handlePrimaryControl = async () => {
+    if (isRecording) {
+      if (isMuted) {
+        setIsMuted(false);
+      } else {
+        setIsMuted(true);
+      }
+      return;
+    }
+
+    if (!isConnected) {
+      const connected = await connectWebSocket();
+      if (!connected) {
+        return;
+      }
+    }
+
+    await startVoiceChat();
+  };
+
+  const primaryControlLabel = () => {
+    if (!isConnected) {
+      return 'Connect & Start';
+    }
+
+    if (!isRecording) {
+      return isProcessing ? 'Processing…' : 'Start conversation';
+    }
+
+    return isMuted ? 'Unmute microphone' : 'Mute microphone';
+  };
+
   const handleEndCall = () => {
-    // Disconnect WebSocket and clean up
+    stopVoiceChat();
     disconnectWebSocket();
-    
+
     const fallbackSlug = profile?.slug || slug;
     navigate(`/chat/${fallbackSlug}`);
   };
@@ -370,16 +443,9 @@ const VoiceCallSession = () => {
                 ← Back
               </button>
               <div className="call-status">
-                <span
-                  className={`status-indicator ${isAssistantSpeaking ? 'speaking' : isConnected ? 'listening' : 'disconnected'}`}
-                  aria-hidden="true"
-                />
+                <span className={`status-indicator ${connectionTone}`} aria-hidden="true" />
                 <div>
-                  <p className="status-title">
-                    {isAssistantSpeaking ? `${assistantFirstName} is speaking` : 
-                     isConnected ? 'Live conversation' : 
-                     connectionError ? 'Connection error' : 'Not connected'}
-                  </p>
+                  <p className="status-title">{connectionLabel}</p>
                   <p className="status-time">{formatDuration(elapsedSeconds)}</p>
                 </div>
               </div>
@@ -389,7 +455,11 @@ const VoiceCallSession = () => {
             </div>
 
             <div className="call-visualizer" role="status" aria-live="polite">
-              <div className={`voice-circle ${isAssistantSpeaking ? 'active' : ''}`}>
+              <div
+                className={`voice-circle ${
+                  isAssistantSpeaking ? 'active' : ''
+                } ${isRecording ? 'recording' : ''}`}
+              >
                 <div className="pulse-ring ring-1" aria-hidden="true" />
                 <div className="pulse-ring ring-2" aria-hidden="true" />
                 <div className="pulse-ring ring-3" aria-hidden="true" />
@@ -419,26 +489,14 @@ const VoiceCallSession = () => {
               </div>
 
               <div className="call-controls">
-                {!isRecording ? (
-                  <button
-                    type="button"
-                    className="control-btn start"
-                    onClick={startVoiceChat}
-                    disabled={isProcessing || connectionError}
-                  >
-                    {isProcessing ? 'Processing...' : 
-                     connectionError ? 'Connection Error' :
-                     !isConnected ? 'Connect & Start' : 'Start Voice Chat'}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="control-btn stop"
-                    onClick={stopVoiceChat}
-                  >
-                    Stop Recording
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className={`control-btn ${isMuted ? 'muted' : ''}`}
+                  onClick={handlePrimaryControl}
+                  disabled={isProcessing}
+                >
+                  {primaryControlLabel()}
+                </button>
                 <button type="button" className="control-btn end" onClick={handleEndCall}>
                   End call
                 </button>
@@ -456,7 +514,7 @@ const VoiceCallSession = () => {
               {transcript.length === 0 && (
                 <div className="transcription-placeholder">
                   <LoadingSpinner size="small" />
-                  <p>Ready for voice conversation. Click "Start Voice Chat" to begin.</p>
+                  <p>Initializing secure voice channel…</p>
                 </div>
               )}
 
@@ -464,36 +522,22 @@ const VoiceCallSession = () => {
                 <div
                   key={`${line.speaker}-${index}`}
                   className={`transcription-line ${
-                    line.speaker === 'You' ? 'user-line' : 
-                    line.speaker === assistantName ? 'assistant-line' : 'system-line'
+                    line.speaker === 'You'
+                      ? 'user-line'
+                      : line.speaker === assistantName
+                      ? 'assistant-line'
+                      : 'system-line'
                   }`}
                 >
                   <span className="speaker">{line.speaker}</span>
                   <span className="text">{line.text}</span>
-                  {line.timestamp && (
-                    <span className="timestamp">
-                      {line.timestamp.toLocaleTimeString()}
-                    </span>
-                  )}
                 </div>
               ))}
 
-              {isRecording && (
-                <div className="transcription-line user-line recording">
-                  <span className="speaker">You</span>
-                  <span className="recording-indicator">
-                    <span />
-                    <span />
-                    <span />
-                    <span />
-                  </span>
-                </div>
-              )}
-
-              {isProcessing && (
-                <div className="transcription-line assistant-line processing">
+              {isAssistantSpeaking && (
+                <div className="transcription-line assistant-line listening">
                   <span className="speaker">{assistantName}</span>
-                  <span className="processing-indicator">
+                  <span className="listening-indicator">
                     <span />
                     <span />
                     <span />
@@ -564,20 +608,25 @@ const VoiceCallSession = () => {
           width: 14px;
           height: 14px;
           border-radius: 50%;
-          box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.2);
-          background: var(--success-500);
+          box-shadow: 0 0 0 6px rgba(67, 97, 238, 0.12);
+          background: var(--gray-400);
           animation: pulse-soft 1.6s infinite ease-in-out;
         }
 
-        .status-indicator.listening {
+        .status-indicator.speaking {
+          background: var(--success-500);
+          box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.2);
+        }
+
+        .status-indicator.listening,
+        .status-indicator.connected {
           background: var(--primary-500);
           box-shadow: 0 0 0 6px rgba(67, 97, 238, 0.18);
         }
 
-        .status-indicator.disconnected {
-          background: var(--gray-400);
-          box-shadow: 0 0 0 6px rgba(156, 163, 175, 0.18);
-          animation: none;
+        .status-indicator.error {
+          background: var(--error-500);
+          box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.2);
         }
 
         .status-title {
@@ -625,6 +674,11 @@ const VoiceCallSession = () => {
           place-items: center;
           background: linear-gradient(145deg, rgba(67, 97, 238, 0.35), rgba(63, 55, 201, 0.15));
           overflow: hidden;
+          transition: box-shadow var(--transition-fast);
+        }
+
+        .voice-circle.recording {
+          box-shadow: 0 30px 80px rgba(239, 68, 68, 0.25);
         }
 
         .voice-circle.active .pulse-ring {
@@ -747,22 +801,17 @@ const VoiceCallSession = () => {
           color: var(--gray-800);
         }
 
-        .control-btn.start {
-          background: var(--success-500);
-          color: var(--white);
-        }
-
-        .control-btn.stop {
-          background: var(--warning-500);
-          color: var(--white);
-        }
-
         .control-btn.end {
           background: var(--error-500);
           color: var(--white);
         }
 
-        .control-btn:hover {
+        .control-btn:disabled {
+          cursor: not-allowed;
+          opacity: 0.7;
+        }
+
+        .control-btn:hover:not(:disabled) {
           transform: translateY(-1px);
           box-shadow: var(--shadow-sm);
         }
@@ -846,6 +895,11 @@ const VoiceCallSession = () => {
           color: rgba(148, 197, 255, 0.92);
         }
 
+        .system-line .text {
+          color: rgba(255, 255, 255, 0.7);
+          font-style: italic;
+        }
+
         .transcription-line.listening .speaker {
           color: rgba(148, 197, 255, 0.85);
         }
@@ -870,87 +924,6 @@ const VoiceCallSession = () => {
 
         .listening-indicator span:nth-child(3) {
           animation-delay: 0.3s;
-        }
-
-        .recording-indicator {
-          display: inline-flex;
-          gap: 4px;
-          align-items: center;
-        }
-
-        .recording-indicator span {
-          width: 6px;
-          height: 6px;
-          border-radius: 999px;
-          background: var(--error-500);
-          animation: pulse-recording 0.8s infinite ease-in-out;
-        }
-
-        .recording-indicator span:nth-child(2) {
-          animation-delay: 0.2s;
-        }
-
-        .recording-indicator span:nth-child(3) {
-          animation-delay: 0.4s;
-        }
-
-        .recording-indicator span:nth-child(4) {
-          animation-delay: 0.6s;
-        }
-
-        .processing-indicator {
-          display: inline-flex;
-          gap: 4px;
-          align-items: center;
-        }
-
-        .processing-indicator span {
-          width: 6px;
-          height: 6px;
-          border-radius: 999px;
-          background: var(--primary-500);
-          animation: pulse-processing 1.2s infinite ease-in-out;
-        }
-
-        .processing-indicator span:nth-child(2) {
-          animation-delay: 0.3s;
-        }
-
-        .processing-indicator span:nth-child(3) {
-          animation-delay: 0.6s;
-        }
-
-        .system-line .text {
-          color: rgba(255, 255, 255, 0.7);
-          font-style: italic;
-        }
-
-        .timestamp {
-          font-size: var(--text-xs);
-          color: rgba(255, 255, 255, 0.4);
-          margin-left: var(--space-2);
-        }
-
-        @keyframes pulse-recording {
-          0%, 100% {
-            transform: scale(0.8);
-            opacity: 0.6;
-          }
-          50% {
-            transform: scale(1.2);
-            opacity: 1;
-          }
-        }
-
-        @keyframes pulse-processing {
-          0%, 100% {
-            transform: scale(0.6);
-            opacity: 0.4;
-          }
-          50% {
-            transform: scale(1);
-            opacity: 0.8;
-          }
         }
 
         @keyframes ripple {

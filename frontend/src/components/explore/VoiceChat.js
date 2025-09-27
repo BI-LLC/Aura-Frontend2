@@ -611,17 +611,23 @@ const VoiceChat = () => {
     }
   };
 
-  // Navigate to production voice chat (HTTP-based, more stable)
+  // Navigate to dedicated voice call session for this assistant
   const handleStartCall = () => {
     if (!isAuthenticated) {
       setShowLoginPrompt(true);
       return;
     }
 
+    const targetSlug = profile?.slug || slug;
+    if (!targetSlug) {
+      return;
+    }
+
     setShowLoginPrompt(false);
 
-    // Use the improved ProductionVoiceChat instead of WebSocket-based VoiceCallSession
-    navigate(`/voice`);
+    navigate(`/chat/${targetSlug}/call`, {
+      state: profile ? { profile } : undefined,
+    });
   };
 
   // Format date
