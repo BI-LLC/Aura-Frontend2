@@ -1126,5 +1126,6 @@ const VoiceCallSession = () => {
       `}</style>
     </div>
   );
+};
 
 export default VoiceCallSession;
