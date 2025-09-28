@@ -194,6 +194,7 @@ const VoiceCallSession = () => {
   const transcribeAudio = useCallback(
     async (audioBlob) => {
       const token = getToken && typeof getToken === 'function' ? getToken() : null;
+      const token = getToken && typeof getToken === 'function' ? await getToken() : null;
       if (!token) {
         throw new Error('Authentication required. Please log in.');
       }
@@ -238,6 +239,7 @@ const VoiceCallSession = () => {
   const fetchAssistantReply = useCallback(
     async (message) => {
       const token = getToken && typeof getToken === 'function' ? getToken() : null;
+      const token = getToken && typeof getToken === 'function' ? await getToken() : null;
       if (!token) {
         throw new Error('Authentication required. Please log in.');
       }
@@ -284,6 +286,7 @@ const VoiceCallSession = () => {
   const synthesizeSpeech = useCallback(
     async (text) => {
       const token = getToken && typeof getToken === 'function' ? getToken() : null;
+      const token = getToken && typeof getToken === 'function' ? await getToken() : null;
       if (!token || !text || !text.trim()) {
         console.error('❌ Missing token or text for synthesis');
         return null;
