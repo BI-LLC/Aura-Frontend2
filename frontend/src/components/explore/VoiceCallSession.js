@@ -47,6 +47,42 @@ const VoiceCallSession = () => {
   const { getToken } = useAuth();
 
   const assistantName = profile?.name || 'Aura Assistant';
+
+  const assistantKeyInfo = useMemo(() => {
+    const candidates = [
+      profile?.assistantKey,
+      profile?.voicePrefs?.assistant_key,
+      profile?.persona?.assistant_key,
+      profile?.persona?.assistantKey,
+      profile?.persona?.slug,
+      profile?.slug,
+      profile?.username,
+      slug,
+    ]
+      .map((value) => (value ? value.toString().trim() : ''))
+      .filter(Boolean);
+
+    if (candidates.length === 0) {
+      console.warn('No assistant key could be resolved for the current profile. Falling back to "default".');
+    }
+
+    return {
+      assistantKey: candidates[0] || 'default',
+      candidates,
+    };
+  }, [profile, slug]);
+
+  const assistantKey = assistantKeyInfo.assistantKey;
+
+  const tenantId = useMemo(() => {
+    const tenantIdRaw =
+      profile?.tenantId ||
+      profile?.tenant_id ||
+      profile?.voicePrefs?.tenant_id ||
+      '';
+
+    return tenantIdRaw ? tenantIdRaw.toString().trim() : '';
+  }, [profile]);
   const assistantFirstName = useMemo(
     () => assistantName.split(' ')[0] || 'Aura',
     [assistantName]
@@ -166,6 +202,11 @@ const VoiceCallSession = () => {
       const filename = determineFilename(audioBlob.type || recorderMimeTypeRef.current);
       formData.append('audio', audioBlob, filename);
       formData.append('language', 'en');
+      formData.append('assistant_key', assistantKey);
+
+      if (tenantId) {
+        formData.append('tenant_id', tenantId);
+      }
 
       const response = await fetch(`${API_BASE_URL}/voice/transcribe`, {
         method: 'POST',
@@ -183,7 +224,7 @@ const VoiceCallSession = () => {
       const result = await response.json();
       return result.text || result.transcription || '';
     },
-    [getToken]
+    [assistantKey, getToken, tenantId]
   );
 
   const fetchAssistantReply = useCallback(
@@ -193,20 +234,25 @@ const VoiceCallSession = () => {
         throw new Error('Authentication required. Please log in.');
       }
 
+      const requestBody = {
+        message,
+        assistant_key: assistantKey,
+        tenant_id: tenantId || undefined,
+        use_documents: true,
+        use_memory: true,
+        user_id: profile?.id || 'anonymous',
+        organization: 'default_org',
+        slug: profile?.slug || slug,
+        search_knowledge: true,
+      };
+
       const response = await fetch(`${API_BASE_URL}/chat/message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          message,
-          user_id: profile?.id || 'anonymous',
-          organization: 'default_org',
-          use_memory: true,
-          search_knowledge: true,
-          slug: profile?.slug || slug,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -217,7 +263,7 @@ const VoiceCallSession = () => {
       const result = await response.json();
       return result.response || '';
     },
-    [getToken, profile, slug]
+    [assistantKey, getToken, profile, slug, tenantId]
   );
 
 // Replace the synthesizeSpeech function in VoiceCallSession.js with this improved version:
@@ -229,45 +275,23 @@ const VoiceCallSession = () => {
           console.error('❌ Missing token or text for synthesis');
           return null;
         }
-    
+
         console.log('🔊 Starting speech synthesis for:', text.substring(0, 50) + '...');
-    
+
         try {
-          // Enhanced assistant key resolution with better fallbacks
-          const assistantKeyCandidates = [
-            profile?.assistantKey,              // New field we added
-            profile?.voicePrefs?.assistant_key, // From voice prefs table
-            profile?.persona?.assistant_key,
-            profile?.persona?.assistantKey,
-            profile?.persona?.slug,
-            profile?.slug,
-            profile?.username,
-            slug,
-          ]
-            .map((value) => (value ? value.toString().trim() : ''))
-            .filter(Boolean);
-    
-          const assistantKey = assistantKeyCandidates[0] || 'default';
           console.log('🔑 Using assistant key:', assistantKey);
-          console.log('🔑 Available candidates:', assistantKeyCandidates);
-    
+          console.log('🔑 Available candidates:', assistantKeyInfo.candidates);
+
           // Enhanced voice preference resolution
           const voicePreference = profile?.voicePreference || profile?.voice_preference || {};
-          const voiceId = 
+          const voiceId =
             voicePreference?.voice_id ||
             voicePreference?.voiceId ||
             profile?.voicePrefs?.voice_id ||
             'default_voice';
-    
+
           console.log('🎵 Using voice ID:', voiceId);
-    
-          const tenantIdRaw =
-            profile?.tenantId ||
-            profile?.tenant_id ||
-            profile?.voicePrefs?.tenant_id ||
-            '';
-          const tenantId = tenantIdRaw ? tenantIdRaw.toString().trim() : '';
-    
+
           // Prepare form data with all required parameters
           const params = new URLSearchParams({
             text: text.substring(0, 500),
@@ -275,7 +299,7 @@ const VoiceCallSession = () => {
             similarity_boost: '0.75',
             assistant_key: assistantKey,
           });
-    
+
           if (tenantId) {
             params.append('tenant_id', tenantId);
           }
@@ -361,16 +385,18 @@ const VoiceCallSession = () => {
           // Enhanced error logging for debugging
           console.error('🔍 Debug info:', {
             profileKeys: Object.keys(profile || {}),
-            assistantKey: profile?.assistantKey,
+            assistantKey,
+            assistantKeyCandidates: assistantKeyInfo.candidates,
             voicePrefs: profile?.voicePrefs,
+            tenantId,
             slug: slug,
             hasToken: !!token
           });
-          
+
           throw error;
         }
       },
-      [getToken, profile, slug]
+      [assistantKey, assistantKeyInfo, getToken, profile, slug, tenantId]
     );
 
   const playAssistantAudio = useCallback(
