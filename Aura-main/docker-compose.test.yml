@@ -1,0 +1,107 @@
+# AURA Voice AI - Test Environment
+# Complete testing setup with all services
+
+version: '3.8'
+
+services:
+  # Redis for memory/caching
+  redis:
+    image: redis:7-alpine
+    container_name: aura-redis-test
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_test_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Backend API
+  backend:
+    build: ./backend
+    container_name: aura-backend-test
+    ports:
+      - "8000:8000"
+    environment:
+      # Test API keys (use dummy values for testing)
+      - GROK_API_KEY=test_grok_key
+      - OPENAI_API_KEY=test_openai_key
+      - ELEVENLABS_API_KEY=test_elevenlabs_key
+      
+      # Database & Cache
+      - REDIS_URL=redis://redis:6379
+      
+      # Authentication & Security
+      - JWT_SECRET=test_jwt_secret_key_for_development_only
+      - INTERNAL_API_KEY=test_internal_api_key
+      
+      # Multi-tenant Configuration
+      - MULTI_TENANT_MODE=true
+      
+      # Voice Settings
+      - ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+      
+      # Development Settings
+      - DEBUG=true
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./backend:/app
+      - tenant_test_data:/data/tenants
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend React App
+  frontend:
+    build: ./frontend
+    container_name: aura-frontend-test
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_WS_URL=ws://localhost:8000
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    command: npm start
+    depends_on:
+      - backend
+
+  # Test Database (PostgreSQL) - Optional for advanced testing
+  postgres:
+    image: postgres:14-alpine
+    container_name: aura-postgres-test
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=aura_test
+      - POSTGRES_USER=aura_user
+      - POSTGRES_PASSWORD=aura_password
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aura_user -d aura_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redis_test_data:
+    driver: local
+  tenant_test_data:
+    driver: local
+  postgres_test_data:
+    driver: local
+
+networks:
+  default:
+    name: aura-test-network
