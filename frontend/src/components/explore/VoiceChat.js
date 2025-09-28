@@ -677,7 +677,7 @@ const VoiceChat = () => {
   const handleChatSubmit = async (e) => {
     e.preventDefault();
     if (!questionInput.trim()) return;
-
+  
     const userMessage = questionInput.trim();
     setQuestionInput('');
     
@@ -688,28 +688,39 @@ const VoiceChat = () => {
       content: userMessage,
       timestamp: new Date()
     }]);
-
+  
     setIsChatting(true);
-
+  
     try {
+      // NEW: Include assistant_key and tenant_id in chat request
+      const assistantKey = profile?.assistantKey || 
+                          profile?.voicePrefs?.assistant_key || 
+                          profile?.slug || 
+                          slug || 
+                          'default';
+      const tenantId = profile?.tenantId || profile?.tenant_id || '';
+  
       // Call the backend API to get AI response
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/chat`, {
+      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/chat/message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           message: userMessage,
+          assistant_key: assistantKey,    // NEW
+          tenant_id: tenantId,           // NEW
           user_id: profile?.id || 'anonymous',
           organization: 'default_org',
-          use_documents: true
+          use_documents: true,
+          use_memory: true
         })
       });
-
+  
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-
+  
       const data = await response.json();
       
       // Add AI response to chat
@@ -731,7 +742,7 @@ const VoiceChat = () => {
       setIsChatting(false);
     }
   };
-
+  
   // Navigate to dedicated voice call session for this assistant
   const handleStartCall = () => {
     if (!isAuthenticated) {
