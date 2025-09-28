@@ -699,12 +699,17 @@ const VoiceChat = () => {
                           slug || 
                           'default';
       const tenantId = profile?.tenantId || profile?.tenant_id || '';
-  
+
+      const token = (typeof supabase?.auth?.getSession === 'function')
+      ? (await supabase.auth.getSession()).data.session?.access_token
+      : null;
+      
       // Call the backend API to get AI response
       const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/chat/message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseToken}` // NEW
         },
         body: JSON.stringify({
           message: userMessage,
