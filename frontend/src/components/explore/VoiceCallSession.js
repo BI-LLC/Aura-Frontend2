@@ -453,7 +453,7 @@ const VoiceCallSession = () => {
             ...prev,
             {
               speaker: 'System',
-              text: 'We could not play the assistant's audio reply. Please check your volume or try again.',
+              text: "We could not play the assistant's audio reply. Please check your volume or try again.",
               timestamp: new Date(),
             },
           ]);
