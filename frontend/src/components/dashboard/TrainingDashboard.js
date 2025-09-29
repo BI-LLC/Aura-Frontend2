@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import LoadingSpinner from '../common/LoadingSpinner';
 import Alert from '../common/Alert';
 
-const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) => {
+const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh, assistantKey, tenantId }) => {
   const LOGIC_NOTE_CATEGORIES = useMemo(
     () => [
       { value: 'general', label: 'General Guidance' },
@@ -65,6 +65,18 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
   const fileInputRef = useRef(null);
 
   const userId = user?.user_id || user?.id || null;
+  
+  // Get dynamic assistant key and tenant ID from props or user data
+  const dynamicAssistantKey = assistantKey || 
+                              user?.user_metadata?.assistant_key || 
+                              user?.user_metadata?.username || 
+                              user?.email?.split('@')[0] || 
+                              'default-assistant';
+  
+  const dynamicTenantId = tenantId || 
+                          user?.user_metadata?.tenant_id || 
+                          user?.tenant_id ||
+                          '00000000-0000-0000-0000-000000000001'; // fallback to default
 
   const showAlert = useCallback((message, type = 'info') => {
     if (alertTimeoutRef.current) {
@@ -288,7 +300,9 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       const payload = {
         prompt: qaFormData.prompt.trim(),
         response: qaFormData.response.trim(),
-        tags: qaFormData.tags
+        tags: qaFormData.tags,
+        assistant_key: dynamicAssistantKey, // Dynamic assistant key
+        tenant_id: dynamicTenantId // Dynamic tenant ID
       };
 
       if (editingQAItem?.id) {
@@ -378,7 +392,7 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
       } else {
         const { error } = await supabase
           .from('logic_notes')
-          .insert([{ ...payload, created_by: userId }]);
+          .insert([{ ...payload, created_by: userId, assistant_key: dynamicAssistantKey, tenant_id: dynamicTenantId }]);
 
         if (error) throw error;
         showAlert('Logic note added successfully.', 'success');
@@ -466,7 +480,9 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh }) =
             file_type: file.type,
             file_size: file.size,
             content,
-            uploaded_by: userId
+            uploaded_by: userId,
+            assistant_key: dynamicAssistantKey,
+            tenant_id: dynamicTenantId
           }
         ]);
 
