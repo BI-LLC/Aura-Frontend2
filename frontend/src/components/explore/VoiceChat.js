@@ -1,4 +1,4 @@
-/ Aura Voice AI - Individual Profile & Voice Chat Component
+// Aura Voice AI - Individual Profile & Voice Chat Component
 // =========================================================
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
