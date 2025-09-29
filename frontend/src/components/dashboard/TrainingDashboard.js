@@ -66,12 +66,20 @@ const TrainingDashboard = ({ user, supabase, updateDashboardData, onRefresh, ass
 
   const userId = user?.user_id || user?.id || null;
   
+  // Normalize assistant key to slug format (e.g., Bib_Halder -> bib-halder)
+  const normalizeAssistantKey = (key) => {
+    if (!key) return 'default-assistant';
+    return key.toLowerCase().replace(/_/g, '-');
+  };
+
   // Get dynamic assistant key and tenant ID from props or user data
-  const dynamicAssistantKey = assistantKey || 
-                              user?.user_metadata?.assistant_key || 
-                              user?.user_metadata?.username || 
-                              user?.email?.split('@')[0] || 
-                              'default-assistant';
+  const rawAssistantKey = assistantKey || 
+                          user?.user_metadata?.assistant_key || 
+                          user?.user_metadata?.username || 
+                          user?.email?.split('@')[0] || 
+                          'default-assistant';
+  
+  const dynamicAssistantKey = normalizeAssistantKey(rawAssistantKey);
   
   const dynamicTenantId = tenantId || 
                           user?.user_metadata?.tenant_id || 
