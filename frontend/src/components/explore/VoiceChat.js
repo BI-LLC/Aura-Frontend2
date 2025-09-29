@@ -331,6 +331,27 @@ const VoiceChat = () => {
 
       let voicePreference = matchedUser.voice_preference || null;
 
+      const sanitizedResolvedSlug = sanitizeSlug(resolvedSlug);
+      const sanitizedUrlSlug = sanitizeSlug(slug);
+      const cachedAssistantKeyValue =
+        voicePreference?.assistant_key ?? voicePreference?.assistantKey ?? '';
+      const cachedAssistantKey = cachedAssistantKeyValue
+        ? cachedAssistantKeyValue.toString().trim()
+        : '';
+      const cachedAssistantKeyLower = cachedAssistantKey.toLowerCase();
+      const sanitizedCachedAssistantKey = sanitizeSlug(cachedAssistantKey);
+
+      const sanitizedSlugTargets = [sanitizedResolvedSlug, sanitizedUrlSlug].filter(Boolean);
+      const cachedAssistantMatchesSlug =
+        sanitizedSlugTargets.length === 0
+          ? Boolean(sanitizedCachedAssistantKey)
+          : sanitizedSlugTargets.some(
+              target => target === cachedAssistantKey || target === cachedAssistantKeyLower
+            );
+
+      const shouldFetchVoicePreference =
+        !voicePreference || !sanitizedCachedAssistantKey || !cachedAssistantMatchesSlug;
+
       const normalizeVoicePreference = (preference) => {
         if (!preference) {
           return null;
@@ -363,7 +384,7 @@ const VoiceChat = () => {
         return preference;
       };
 
-      if (!voicePreference) {
+      if (shouldFetchVoicePreference) {
         const assistantKeyCandidates = new Set(
           [
             personaSettings.assistant_key,
@@ -411,7 +432,20 @@ const VoiceChat = () => {
               throw voicePrefError;
             }
           } else if (voicePrefMatches && voicePrefMatches.length > 0) {
-            voicePreference = voicePrefMatches[0];
+            const latestVoicePreference = voicePrefMatches[0];
+            const fetchedAssistantKey =
+              latestVoicePreference.assistant_key ||
+              latestVoicePreference.assistantKey ||
+              sanitizedResolvedSlug ||
+              sanitizedUrlSlug ||
+              null;
+
+            voicePreference = {
+              ...(voicePreference || {}),
+              ...latestVoicePreference,
+              assistant_key: fetchedAssistantKey,
+              assistantKey: fetchedAssistantKey,
+            };
           }
         }
       }
