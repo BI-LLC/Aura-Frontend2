@@ -9,6 +9,7 @@ from . import documents
 from . import streaming
 from . import continuous_voice
 from . import tenant_admin
+from . import training
 
 # Try to import optional routers
 try:
@@ -24,5 +25,6 @@ __all__ = [
     'streaming',
     'continuous_voice',
     'tenant_admin',
+    'training',
     'memory'
 ]

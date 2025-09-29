@@ -557,6 +557,84 @@ CREATE INDEX IF NOT EXISTS idx_tenant_invoices_due_date ON tenant_invoices(due_d
 CREATE INDEX IF NOT EXISTS idx_usage_logs_tenant_date ON tenant_usage_logs(tenant_id, date);
 
 -- =====================================================
+-- TRAINING DATA TABLES (Q&A PAIRS, LOGIC NOTES, REFERENCE MATERIALS)
+-- =====================================================
+
+-- Training data table (Q&A pairs)
+CREATE TABLE IF NOT EXISTS training_data (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+    assistant_key VARCHAR(255) NOT NULL,
+    prompt TEXT NOT NULL,
+    response TEXT NOT NULL,
+    tags JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Logic notes table (business rules and processes)
+CREATE TABLE IF NOT EXISTS logic_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+    assistant_key VARCHAR(255) NOT NULL,
+    title VARCHAR(500) NOT NULL,
+    content TEXT NOT NULL,
+    category VARCHAR(100) DEFAULT 'general',
+    tags JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Reference materials table (supporting documentation)
+CREATE TABLE IF NOT EXISTS reference_materials (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+    assistant_key VARCHAR(255) NOT NULL,
+    title VARCHAR(500) NOT NULL,
+    content TEXT NOT NULL,
+    category VARCHAR(100) DEFAULT 'documentation',
+    tags JSONB DEFAULT '[]'::jsonb,
+    filename VARCHAR(500),
+    file_type VARCHAR(50),
+    file_size BIGINT,
+    uploaded_by UUID REFERENCES tenant_users(user_id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Training data indexes for performance
+CREATE INDEX IF NOT EXISTS idx_training_data_assistant_key ON training_data(assistant_key);
+CREATE INDEX IF NOT EXISTS idx_training_data_tenant ON training_data(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_logic_notes_assistant_key ON logic_notes(assistant_key);
+CREATE INDEX IF NOT EXISTS idx_logic_notes_tenant ON logic_notes(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_reference_materials_assistant_key ON reference_materials(assistant_key);
+CREATE INDEX IF NOT EXISTS idx_reference_materials_tenant ON reference_materials(tenant_id);
+
+-- =====================================================
+-- ASSISTANT VOICE PREFERENCES TABLE
+-- =====================================================
+
+-- Table to store voice settings for each AI assistant
+CREATE TABLE IF NOT EXISTS assistant_voice_prefs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    assistant_key VARCHAR(100) NOT NULL,
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+    provider VARCHAR(50) DEFAULT 'elevenlabs',
+    voice_id VARCHAR(100) NOT NULL,
+    model VARCHAR(50) DEFAULT 'eleven_multilingual_v2',
+    params JSONB DEFAULT '{"stability": 0.5, "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": true}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Unique constraint: one voice config per assistant per tenant
+    CONSTRAINT unique_assistant_voice_per_tenant UNIQUE (assistant_key, tenant_id)
+);
+
+-- Index for quick voice lookups
+CREATE INDEX IF NOT EXISTS idx_assistant_voice_prefs_assistant ON assistant_voice_prefs(assistant_key);
+CREATE INDEX IF NOT EXISTS idx_assistant_voice_prefs_tenant ON assistant_voice_prefs(tenant_id);
+
+-- =====================================================
 -- SAMPLE DATA (FOR TESTING)
 -- =====================================================
 
@@ -569,3 +647,34 @@ ON CONFLICT (tenant_id) DO NOTHING;
 INSERT INTO tenant_users (user_id, tenant_id, email, role, name)
 VALUES ('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'admin@default.com', 'admin', 'Default Admin')
 ON CONFLICT (user_id) DO NOTHING;
+
+-- Insert voice preferences for bib-halder assistant (using slug format)
+INSERT INTO assistant_voice_prefs (assistant_key, tenant_id, voice_id, provider, model) VALUES
+('bib-halder', '00000000-0000-0000-0000-000000000001', 'Jn2FTGxo9WlzIb33zWo9', 'elevenlabs', 'eleven_multilingual_v2')
+ON CONFLICT (assistant_key, tenant_id) DO UPDATE SET
+    voice_id = EXCLUDED.voice_id,
+    updated_at = NOW();
+
+
+-- =====================================================
+-- SAMPLE TRAINING DATA FOR BIB_HALDER
+-- =====================================================
+
+-- Insert Q&A pairs for bib-halder assistant (using slug format)
+INSERT INTO training_data (tenant_id, assistant_key, prompt, response, tags) VALUES
+('00000000-0000-0000-0000-000000000001', 'bib-halder', 'How to be a hero?', 'You need to be a strong individual and good heart.', '["motivation", "hero"]'),
+('00000000-0000-0000-0000-000000000001', 'bib-halder', 'What makes someone heroic?', 'A heroic person demonstrates courage, compassion, and selflessness in their actions.', '["hero", "character"]'),
+('00000000-0000-0000-0000-000000000001', 'bib-halder', 'How can I develop inner strength?', 'Inner strength comes from facing challenges with determination and maintaining your values even when it is difficult.', '["strength", "personal development"]')
+ON CONFLICT DO NOTHING;
+
+-- Insert logic notes for bib-halder assistant (using slug format)
+INSERT INTO logic_notes (tenant_id, assistant_key, title, content, category, tags) VALUES
+('00000000-0000-0000-0000-000000000001', 'bib-halder', 'Core Philosophy: Heroism', 'True heroism is not about superpowers or grand gestures. It is about having the courage to do what is right, even when no one is watching. A hero helps others, stands up for justice, and never gives up on their principles.', 'philosophy', '["hero", "principles", "courage"]'),
+('00000000-0000-0000-0000-000000000001', 'bib-halder', 'Character Development Guide', 'Building character requires daily practice of good habits: honesty, kindness, perseverance, and humility. Small acts of goodness compound over time to create a strong moral foundation.', 'personal_development', '["character", "habits", "growth"]')
+ON CONFLICT DO NOTHING;
+
+-- Insert reference materials for bib-halder assistant (using slug format)
+INSERT INTO reference_materials (tenant_id, assistant_key, title, content, category, tags) VALUES
+('00000000-0000-0000-0000-000000000001', 'bib-halder', 'Historical Heroes Reference', 'Throughout history, heroes have shared common traits: they put others before themselves, they stand up for what is right despite personal cost, and they inspire others through their actions rather than their words.', 'historical', '["history", "heroes", "leadership"]'),
+('00000000-0000-0000-0000-000000000001', 'bib-halder', 'Daily Heroism Practices', 'Heroic actions can be small and everyday: helping a neighbor, listening to someone in need, standing up against bullying, volunteering for community causes, or simply being honest when it is difficult.', 'practical', '["daily", "practice", "community"]')
+ON CONFLICT DO NOTHING;

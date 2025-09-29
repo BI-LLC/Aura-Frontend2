@@ -12,6 +12,7 @@ from app.services.voice_pipeline import VoicePipeline, AudioTranscription, Audio
 from app.services.smart_router import SmartRouter
 from app.services.memory_engine import MemoryEngine
 from app.services.voice_service import voice_service
+from app.services.training_data_service import get_training_data_service
 
 logger = logging.getLogger(__name__)
 
@@ -235,21 +236,60 @@ async def process_voice_message(
 
         logger.info(f"Transcribed: {transcription.text[:50]}...")
 
-        # Step 2: LLM
-        message_text = transcription.text
+        # Step 2: Build AI Context with Training Data (PRIORITY)
+        training_service = get_training_data_service()
+        
+        # Get training data context first
+        training_context = await training_service.get_training_context(
+            transcription.text, 
+            assistant_key, 
+            tenant_id
+        )
+        
+        # Build the AI system prompt with STRICT training data enforcement
+        if training_context:
+            # STRICT MODE: Only use training data
+            assistant_name = assistant_key or "Assistant"
+            message_text = f"""You are {assistant_name}, a specialized voice AI assistant trained EXCLUSIVELY on uploaded content.
+
+ABSOLUTE RULES - NO EXCEPTIONS:
+1. You MUST ONLY use information from the training data provided below
+2. If the user's question cannot be answered directly, look for similar or related terms in the training data
+3. If you find similar terms, respond: "I don't know about [exact term], but did you mean [similar term]? [explain the similar term]"
+4. If no similar terms exist, respond EXACTLY: "I don't know."
+5. Never use general knowledge, assumptions, or external information
+6. Only reference facts explicitly stated in the training materials
+
+EXAMPLES:
+- User says "What is V.I.C?" → "I don't know about V.I.C., but did you mean BIC? BIC stands for Bibhrajit Investment Corporation..."
+- User says "Who is the founder?" → Answer directly if found in training data
+- User says "What is the ocean?" → "I don't know." (no similar terms in training data)
+
+TRAINING DATA (Your ONLY knowledge source):
+{training_context}
+
+USER SAID: {transcription.text}
+
+RESPONSE (use ONLY the training data above, suggest similar terms if relevant, or respond "I don't know."):"""
+        else:
+            # NO TRAINING DATA: Enforce "I don't know" rule
+            message_text = f"""You are a specialized voice AI assistant.
+
+CRITICAL RULE: You have no training data available for this query.
+
+USER SAID: {transcription.text}
+
+Response: I don't know."""
+        
+        # Add memory context if requested (secondary priority)
         if use_memory and user_id and memory_engine:
             preferences = await memory_engine.get_user_preferences(user_id)
             if preferences:
-                context_prompt = f"""
-                User preferences:
-                - Communication style: {preferences.communication_style}
-                - Response pace: {preferences.response_pace}
+                message_text = f"""User preferences:
+- Communication style: {preferences.communication_style}
+- Response pace: {preferences.response_pace}
 
-                User said: {message_text}
-
-                Please respond according to the user's preferences.
-                """
-                message_text = context_prompt
+{message_text}"""
 
         llm_response = await smart_router.route_message(message_text)
         if llm_response.error:

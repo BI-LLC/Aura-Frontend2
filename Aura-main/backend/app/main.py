@@ -133,6 +133,7 @@ async def lifespan(app: FastAPI):
             from app.services.memory_engine import MemoryEngine
             from app.services.voice_pipeline import VoicePipeline
             from app.services.data_ingestion import DataIngestionService
+            from app.services.document_processor import DocumentProcessor
             from app.services.continuous_conversation import ContinuousConversationManager
             from app.services.persona_manager import PersonaManager
             
@@ -141,6 +142,7 @@ async def lifespan(app: FastAPI):
             voice_pipeline = VoicePipeline()
             persona_manager = PersonaManager()
             data_service = DataIngestionService()
+            document_processor = DocumentProcessor()
             
             # Initialize continuous conversation manager
             conversation_manager = ContinuousConversationManager(
@@ -157,12 +159,12 @@ async def lifespan(app: FastAPI):
             # Import and setup all routers
             from app.routers import (
                 chat, voice, admin, memory, streaming, 
-                documents, continuous_voice, tenant_admin, auth
+                documents, continuous_voice, tenant_admin, training
             )
             
             # Set services in routers that need them
             if hasattr(chat, 'set_services'):
-                chat.set_services(smart_router, memory_engine)
+                chat.set_services(document_processor, smart_router, memory_engine)
             if hasattr(voice, 'set_services'):
                 voice.set_services(smart_router, memory_engine)
             if hasattr(admin, 'set_services'):
@@ -183,6 +185,7 @@ async def lifespan(app: FastAPI):
             app.include_router(documents.router)
             app.include_router(continuous_voice.router)
             app.include_router(tenant_admin.router)
+            app.include_router(training.router)
             
             logger.info("🎯 AURA Voice AI: All routers and services connected successfully!")
             
@@ -251,6 +254,7 @@ async def root():
             "voice": "/voice/status",
             "admin": "/admin/dashboard",
             "documents": "/documents/upload",
+            "training": "/training/",
             "health": "/health",
             "test_ui": "/test"
         }
@@ -526,8 +530,8 @@ async def chat_with_tenant_context(
     message: str
 ):
     # Process chat using only tenant's data
-    tenant_id = request.state.tenant_id
-    user_id = request.state.user_id
+        tenant_id = request.state.tenant_id
+        user_id = request.state.user_id
     
     # Get tenant's knowledge context
     router = tenant_aware_services["smart_router"]
@@ -794,7 +798,7 @@ async def health_check():
             health_data["apis"] = await smart_router.get_health_status()
         except Exception as e:
             health_data["api_check_error"] = str(e)
-
+    
     return JSONResponse(health_data)
 
 @app.get("/api/health", include_in_schema=False)
@@ -878,8 +882,8 @@ async def upload_document(
     file: UploadFile = File(...)
 ):
     # Upload document to tenant's knowledge base
-    tenant_id = request.state.tenant_id
-    user_id = request.state.user_id
+        tenant_id = request.state.tenant_id
+        user_id = request.state.user_id
     
     # Validate file
     if file.size > 10 * 1024 * 1024:  # 10MB limit
@@ -896,11 +900,11 @@ async def upload_document(
     # Ingest into tenant's knowledge base
     document = await data_service.ingest_file(
         file_path=temp_path,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        metadata={
-            "original_name": file.filename,
-            "uploaded_by": user_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                metadata={
+                    "original_name": file.filename,
+                    "uploaded_by": user_id,
             "organization": request.state.organization
         }
     )
@@ -917,10 +921,10 @@ async def upload_document(
 @app.get("/api/documents")
 async def get_tenant_documents(request: Request):
     # Get documents for current tenant
-    tenant_id = request.state.tenant_id
+        tenant_id = request.state.tenant_id
     
-    data_service = tenant_aware_services["data_ingestion"]
-    documents = await data_service.get_tenant_documents(tenant_id)
+            data_service = tenant_aware_services["data_ingestion"]
+            documents = await data_service.get_tenant_documents(tenant_id)
     
     return {
         "organization": request.state.organization,
@@ -1961,3 +1965,4 @@ async def debug_interface():
     </body>
     </html>
     """)
+

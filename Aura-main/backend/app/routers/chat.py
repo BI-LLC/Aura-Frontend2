@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from app.services.smart_router import SmartRouter
 from app.services.document_processor import DocumentProcessor
 from app.services.memory_engine import MemoryEngine
+from app.services.training_data_service import get_training_data_service
 
 logger = logging.getLogger(__name__)
 
@@ -51,18 +52,28 @@ class ChatResponse(BaseModel):
 
 @router.post("/message", response_model=ChatResponse)
 async def chat_with_documents(request: ChatRequest):
-    """Chat endpoint with document context support"""
+    """Chat endpoint with training data and document context support"""
     try:
         if not smart_router:
             raise HTTPException(status_code=503, detail="Services not initialized")
         
-        # Build context from documents if requested
+        # Get training data service
+        training_service = get_training_data_service()
+        
+        # PRIORITY 1: Get training data context (Q&A pairs, logic notes, reference materials)
+        training_context = await training_service.get_training_context(
+            request.message, 
+            request.assistant_key, 
+            request.tenant_id
+        )
+        
+        # PRIORITY 2: Get document context if requested (fallback)
         document_context = ""
         document_used = None
         context_sources = []
         
-        if request.use_documents and document_processor:
-            # Get document context
+        if request.use_documents and document_processor and not training_context:
+            # Only use documents if no training data found
             document_context = document_processor.get_context_for_query(
                 request.message,
                 doc_id=request.document_id,
@@ -81,20 +92,56 @@ async def chat_with_documents(request: ChatRequest):
                     results = document_processor.search_documents(request.message, request.user_id)
                     context_sources = list(set([r['filename'] for r in results[:3]]))
         
-        # Build the full prompt with document context
-        full_prompt = ""
-        if document_context:
-            full_prompt = f"""You are a helpful AI assistant. Use the following document context to answer the user's question.
+        # Build the AI system prompt with STRICT training data enforcement
+        if training_context:
+            # STRICT MODE: Only use training data
+            assistant_name = request.assistant_key or "Assistant"
+            full_prompt = f"""You are {assistant_name}, a specialized AI assistant trained EXCLUSIVELY on uploaded content.
+
+ABSOLUTE RULES - NO EXCEPTIONS:
+1. You MUST ONLY use information from the training data provided below
+2. If the user's question cannot be answered directly, look for similar or related terms in the training data
+3. If you find similar terms, respond: "I don't know about [exact term], but did you mean [similar term]? [explain the similar term]"
+4. If no similar terms exist, respond EXACTLY: "I don't know."
+5. Never use general knowledge, assumptions, or external information
+6. Only reference facts explicitly stated in the training materials
+
+EXAMPLES:
+- User asks "What is V.I.C?" → "I don't know about V.I.C., but did you mean BIC? BIC stands for Bibhrajit Investment Corporation..."
+- User asks "Who is the founder?" → Answer directly if found in training data
+- User asks "What is the ocean?" → "I don't know." (no similar terms in training data)
+
+TRAINING DATA (Your ONLY knowledge source):
+{training_context}
+
+USER QUESTION: {request.message}
+
+RESPONSE (use ONLY the training data above, suggest similar terms if relevant, or respond "I don't know."):"""
             
+            context_sources = ["Training Data: Q&A Pairs", "Training Data: Logic Notes", "Training Data: Reference Materials"]
+            
+        elif document_context:
+            # FALLBACK: Use documents with "I don't know" rule
+            full_prompt = f"""You are a helpful AI assistant. Use ONLY the following document context to answer the user's question.
+
+CRITICAL RULE: If the answer is not in the documents below, respond EXACTLY: "I don't know."
+
 Document Context:
 {document_context}
 
 User Question: {request.message}
 
-Please provide a comprehensive answer based on the document context provided. If the answer is not in the documents, say so."""
+Answer based STRICTLY on the document context above, or say "I don't know.":"""
+            
         else:
-            # No document context, just use the message
-            full_prompt = request.message
+            # NO CONTEXT: Enforce "I don't know" rule
+            full_prompt = f"""You are a specialized AI assistant.
+
+CRITICAL RULE: You have no training data or documents available for this query.
+
+User Question: {request.message}
+
+Response: I don't know."""
         
         # Add memory context if requested
         if request.use_memory and request.user_id and memory_engine:
@@ -119,7 +166,7 @@ Please provide a comprehensive answer based on the document context provided. If
             context_sources=context_sources,
             response_time=response.response_time,
             cost=response.cost,
-            assistant_key=request.assistant_key  # NEW: Echo back assistant key
+            assistant_key=request.assistant_key  # Echo back assistant key
         )
         
     except HTTPException:
