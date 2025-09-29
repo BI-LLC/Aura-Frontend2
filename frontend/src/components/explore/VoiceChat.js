@@ -1,4 +1,4 @@
-// Aura Voice AI - Individual Profile & Voice Chat Component
+/ Aura Voice AI - Individual Profile & Voice Chat Component
 // =========================================================
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -16,6 +16,8 @@ import { copyTextToClipboard } from '../../utils/clipboard';
  * Connects to Supabase to fetch user data by slug
  */
 const PROFILE_BUCKET = process.env.REACT_APP_SUPABASE_AVATAR_BUCKET || 'avatars';
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai';
+
 const looksLikeEmail = (value) => /@/.test((value || '').toString());
 const sanitizeDisplayText = (value) => {
   if (!value) {
@@ -49,6 +51,22 @@ const VoiceChat = () => {
   const [avatarError, setAvatarError] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [shareStatus, setShareStatus] = useState('idle');
+
+  // Extract assistant_key and tenant_id from profile for API calls
+  const assistantKey = useMemo(() => {
+    return profile?.assistantKey || 
+           profile?.voicePrefs?.assistant_key || 
+           profile?.slug || 
+           slug || 
+           'default';
+  }, [profile, slug]);
+
+  const tenantId = useMemo(() => {
+    return profile?.tenantId || 
+           profile?.tenant_id || 
+           profile?.voicePrefs?.tenant_id || 
+           null;
+  }, [profile]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -540,15 +558,12 @@ const VoiceChat = () => {
     }
   }, [getPublicAvatarUrl, slug, supabase]);
 
-
   // Fetch profile data on component mount
   useEffect(() => {
     if (slug) {
       fetchProfile();
     }
   }, [slug, fetchProfile]);
-
-
 
   // Generate title from name and expertise
   const generateTitle = (name, expertiseAreas) => {
@@ -673,11 +688,11 @@ const VoiceChat = () => {
     setShareStatus(success ? 'copied' : 'error');
   };
 
-  // Handle text chat submission
+  // Updated text chat submission with new API structure
   const handleChatSubmit = async (e) => {
     e.preventDefault();
     if (!questionInput.trim()) return;
-  
+
     const userMessage = questionInput.trim();
     setQuestionInput('');
     
@@ -688,45 +703,54 @@ const VoiceChat = () => {
       content: userMessage,
       timestamp: new Date()
     }]);
-  
-    setIsChatting(true);
-  
-    try {
-      // NEW: Include assistant_key and tenant_id in chat request
-      const assistantKey = profile?.assistantKey || 
-                          profile?.voicePrefs?.assistant_key || 
-                          profile?.slug || 
-                          slug || 
-                          'default';
-      const tenantId = profile?.tenantId || profile?.tenant_id || '';
 
-      const token = (typeof supabase?.auth?.getSession === 'function')
-      ? (await supabase.auth.getSession()).data.session?.access_token
-      : null;
-      
-      // Call the backend API to get AI response
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/chat/message`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseToken}` // NEW
-        },
-        body: JSON.stringify({
-          message: userMessage,
-          assistant_key: assistantKey,    // NEW
-          tenant_id: tenantId,           // NEW
-          user_id: profile?.id || 'anonymous',
-          organization: 'default_org',
-          use_documents: true,
-          use_memory: true
-        })
-      });
-  
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+    setIsChatting(true);
+
+    try {
+      console.log('💬 Sending chat message with:', { assistantKey, tenantId, message: userMessage.substring(0, 50) + '...' });
+
+      // Get auth token
+      const token = getToken && typeof getToken === 'function' ? getToken() : null;
+
+      const requestBody = {
+        message: userMessage,
+        assistant_key: assistantKey, // NEW
+        tenant_id: tenantId,         // NEW
+        use_documents: true,
+        use_memory: true,
+        // Keep legacy fields for compatibility
+        user_id: profile?.id || 'anonymous',
+        organization: 'default_org'
+      };
+
+      const headers = {
+        'Content-Type': 'application/json',
+      };
+
+      // Add Authorization header if token is available
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
-  
+
+      console.log('📤 Sending chat request:', { headers: Object.keys(headers), body: requestBody });
+
+      // Call the backend API with new structure
+      const response = await fetch(`${API_BASE_URL}/chat/message`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody)
+      });
+
+      console.log('📥 Chat response status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        console.error('❌ Chat request failed:', response.status, errorText);
+        throw new Error(`Chat request failed: ${response.status}${errorText ? ` - ${errorText}` : ''}`);
+      }
+
       const data = await response.json();
+      console.log('✅ Chat response received:', { hasResponse: !!data.response });
       
       // Add AI response to chat
       setMessages(prev => [...prev, {
@@ -736,18 +760,40 @@ const VoiceChat = () => {
         timestamp: new Date()
       }]);
     } catch (error) {
-      console.error('Chat error:', error);
+      console.error('❌ Chat error:', error);
+      
+      // Enhanced error logging for debugging
+      console.error('🔍 Debug info:', {
+        assistantKey,
+        tenantId,
+        hasProfile: !!profile,
+        hasToken: !!getToken,
+        profileKeys: Object.keys(profile || {})
+      });
+
+      let errorMessage = 'Sorry, I encountered an error processing your message. ';
+      
+      if (error.message.includes('401')) {
+        errorMessage += 'Please sign in and try again.';
+      } else if (error.message.includes('404')) {
+        errorMessage += `Assistant "${assistantKey}" may not be configured properly.`;
+      } else if (error.message.includes('500')) {
+        errorMessage += 'The server is experiencing issues. Please try again later.';
+      } else {
+        errorMessage += 'Please make sure you\'re connected to the internet and try again.';
+      }
+
       setMessages(prev => [...prev, {
         id: Date.now() + 1,
         type: 'ai',
-        content: 'Sorry, I encountered an error connecting to the AI service. Please make sure the backend server is running and try again.',
+        content: errorMessage,
         timestamp: new Date()
       }]);
     } finally {
       setIsChatting(false);
     }
   };
-  
+
   // Navigate to dedicated voice call session for this assistant
   const handleStartCall = () => {
     if (!isAuthenticated) {
