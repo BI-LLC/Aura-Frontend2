@@ -1,4 +1,4 @@
-/ Aura Voice AI - Individual Profile & Voice Chat Component
+// Aura Voice AI - Individual Profile & Voice Chat Component
 // =========================================================
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -331,6 +331,35 @@ const VoiceChat = () => {
 
       let voicePreference = matchedUser.voice_preference || null;
 
+      const sanitizedResolvedSlug = sanitizeSlug(resolvedSlug);
+      const sanitizedUrlSlug = sanitizeSlug(slug);
+      const cachedAssistantKeyValue =
+        voicePreference?.assistant_key ?? voicePreference?.assistantKey ?? '';
+      const cachedAssistantKey = cachedAssistantKeyValue
+        ? cachedAssistantKeyValue.toString().trim()
+        : '';
+      const sanitizedCachedAssistantKey = sanitizeSlug(cachedAssistantKey);
+      const cachedAssistantKeyLower = cachedAssistantKey.toLowerCase();
+
+      const sanitizedSlugTargets = [sanitizedResolvedSlug, sanitizedUrlSlug].filter(Boolean);
+      const sanitizedKeyMatchesSlug =
+        sanitizedCachedAssistantKey && sanitizedSlugTargets.length > 0
+          ? sanitizedSlugTargets.some(target => target === sanitizedCachedAssistantKey)
+          : Boolean(sanitizedCachedAssistantKey);
+
+      const rawKeyMatchesSlug =
+        cachedAssistantKey && sanitizedSlugTargets.length > 0
+          ? sanitizedSlugTargets.some(
+              target => target === cachedAssistantKey || target === cachedAssistantKeyLower
+            )
+          : Boolean(cachedAssistantKey);
+
+      const shouldFetchVoicePreference =
+        !voicePreference ||
+        !sanitizedCachedAssistantKey ||
+        !sanitizedKeyMatchesSlug ||
+        !rawKeyMatchesSlug;
+
       const normalizeVoicePreference = (preference) => {
         if (!preference) {
           return null;
@@ -363,30 +392,41 @@ const VoiceChat = () => {
         return preference;
       };
 
-      if (!voicePreference) {
-        const assistantKeyCandidates = new Set(
-          [
-            personaSettings.assistant_key,
-            personaSettings.assistantKey,
-            personaSettings.slug,
-            personaSettings.slug?.toString().trim().toLowerCase(),
-            personaSettings.identifier,
-            personaSettings.voice_assistant_key,
-            personaSettings.voiceAssistantKey,
-            personaSettings.id,
-            personaSettings.key,
-            profileDetails?.username,
-            profileDetails?.username?.toString().trim().toLowerCase(),
-            matchedUser.user_id,
-            matchedUser.user_id ? matchedUser.user_id.toString() : '',
-            matchedUser.email?.split('@')[0],
-            resolvedSlug,
-            slug,
-          ]
-            .concat(Array.from(slugCandidates))
-            .map((value) => (value ? value.toString().trim() : ''))
-            .filter(Boolean)
-        );
+      if (shouldFetchVoicePreference) {
+        const assistantKeyCandidates = new Set();
+        const candidateValues = [
+          personaSettings.assistant_key,
+          personaSettings.assistantKey,
+          personaSettings.slug,
+          personaSettings.slug?.toString().trim().toLowerCase(),
+          personaSettings.identifier,
+          personaSettings.voice_assistant_key,
+          personaSettings.voiceAssistantKey,
+          personaSettings.id,
+          personaSettings.key,
+          profileDetails?.username,
+          profileDetails?.username?.toString().trim().toLowerCase(),
+          matchedUser.user_id,
+          matchedUser.user_id ? matchedUser.user_id.toString() : '',
+          matchedUser.email?.split('@')[0],
+          resolvedSlug,
+          slug,
+          ...Array.from(slugCandidates),
+        ];
+
+        candidateValues.forEach((value) => {
+          if (value === null || value === undefined) {
+            return;
+          }
+          const trimmed = value.toString().trim();
+          if (trimmed) {
+            assistantKeyCandidates.add(trimmed);
+            const sanitizedCandidate = sanitizeSlug(trimmed);
+            if (sanitizedCandidate) {
+              assistantKeyCandidates.add(sanitizedCandidate);
+            }
+          }
+        });
 
         if (assistantKeyCandidates.size > 0) {
           let voicePrefQuery = supabase
@@ -411,14 +451,38 @@ const VoiceChat = () => {
               throw voicePrefError;
             }
           } else if (voicePrefMatches && voicePrefMatches.length > 0) {
-            voicePreference = voicePrefMatches[0];
+            const latestVoicePreference = voicePrefMatches[0];
+            const supabaseAssistantKeyRaw =
+              latestVoicePreference.assistant_key || latestVoicePreference.assistantKey || '';
+            const trimmedSupabaseAssistantKey = supabaseAssistantKeyRaw
+              ? supabaseAssistantKeyRaw.toString().trim()
+              : '';
+            const mergedAssistantKey =
+              sanitizeSlug(trimmedSupabaseAssistantKey) ||
+              sanitizedCachedAssistantKey ||
+              sanitizedResolvedSlug ||
+              sanitizedUrlSlug ||
+              trimmedSupabaseAssistantKey ||
+              cachedAssistantKey ||
+              null;
+
+            voicePreference = {
+              ...(voicePreference || {}),
+              ...latestVoicePreference,
+              assistant_key: mergedAssistantKey,
+              assistantKey: mergedAssistantKey,
+            };
           }
         }
       }
 
       const normalizedVoicePreference = normalizeVoicePreference(voicePreference);
 
-      const assistantKey =
+      const sanitizedPreferenceAssistantKey = sanitizeSlug(
+        normalizedVoicePreference?.assistant_key || normalizedVoicePreference?.assistantKey || ''
+      );
+
+      const fallbackAssistantKeyValue =
         normalizedVoicePreference?.assistant_key ||
         normalizedVoicePreference?.assistantKey ||
         personaSettings.assistant_key ||
@@ -426,8 +490,21 @@ const VoiceChat = () => {
         profileDetails?.username ||
         resolvedSlug;
 
+      const fallbackAssistantKey = fallbackAssistantKeyValue
+        ? fallbackAssistantKeyValue.toString().trim()
+        : '';
+
+      const assistantKey =
+        sanitizedPreferenceAssistantKey ||
+        sanitizeSlug(fallbackAssistantKey) ||
+        fallbackAssistantKey ||
+        sanitizedResolvedSlug ||
+        sanitizedUrlSlug ||
+        resolvedSlug;
+
       const voicePreferenceDetails = normalizedVoicePreference
         ? {
+            ...normalizedVoicePreference,
             voice_id:
               normalizedVoicePreference.voice_id ||
               normalizedVoicePreference.voiceId ||
@@ -442,8 +519,8 @@ const VoiceChat = () => {
               normalizedVoicePreference.voice_model ||
               normalizedVoicePreference.params?.model ||
               'eleven_monolingual_v1',
-            assistant_key: normalizedVoicePreference.assistant_key || assistantKey || resolvedSlug,
-            ...normalizedVoicePreference,
+            assistant_key: assistantKey,
+            assistantKey,
           }
         : null;
 

@@ -320,38 +320,60 @@ const VoiceCallSession = () => {
           }
         }
 
-        const result = await response.json();
-        console.log('✅ Synthesis result:', { 
-          success: result.success, 
-          hasAudio: !!result.audio,
-          audioLength: result.audio ? result.audio.length : 0
-        });
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
 
-        if (result?.success === false) {
-          throw new Error(result?.message || 'Speech synthesis unavailable.');
+        if (contentType.includes('application/json')) {
+          const result = await response.json();
+          console.log('✅ Synthesis result:', {
+            success: result.success,
+            hasAudio: !!result.audio || !!result.audioContent,
+            audioLength: result.audio ? result.audio.length : result.audioContent ? result.audioContent.length : 0
+          });
+
+          if (result?.success === false) {
+            throw new Error(result?.message || 'Speech synthesis unavailable.');
+          }
+
+          if (result?.audio) {
+            return {
+              base64: result.audio,
+              contentType: result?.content_type || result?.mime_type || 'audio/mpeg',
+            };
+          }
+
+          if (result?.audioContent) {
+            return {
+              base64: result.audioContent,
+              contentType: result?.contentType || 'audio/mpeg',
+            };
+          }
+
+          if (result?.audio_url || result?.url) {
+            return {
+              url: result.audio_url || result.url,
+              contentType: result?.content_type || result?.mime_type || 'audio/mpeg',
+            };
+          }
+
+          throw new Error('No audio data received from synthesis service');
         }
 
-        if (result?.audio) {
+        if (contentType.includes('audio/')) {
+          const audioBlob = await response.blob();
+          const blobType = audioBlob.type || contentType || 'audio/mpeg';
+          const objectUrl = URL.createObjectURL(audioBlob);
           return {
-            base64: result.audio,
-            contentType: result?.content_type || result?.mime_type || 'audio/mpeg',
+            url: objectUrl,
+            contentType: blobType,
+            cleanup: () => URL.revokeObjectURL(objectUrl),
           };
         }
 
-        if (result?.audioContent) {
-          return {
-            base64: result.audioContent,
-            contentType: result?.contentType || 'audio/mpeg',
-          };
-        }
-
-        if (result?.audio_url || result?.url) {
-          return {
-            url: result.audio_url || result.url,
-          };
-        }
-
-        throw new Error('No audio data received from synthesis service');
+        const unexpectedBody = await response.text().catch(() => '');
+        throw new Error(
+          `Unexpected content-type from synth service: ${contentType || 'unknown'}` +
+            (unexpectedBody ? `. ${unexpectedBody}` : '')
+        );
 
       } catch (error) {
         console.error('❌ Speech synthesis error:', error);
@@ -374,7 +396,7 @@ const VoiceCallSession = () => {
 
   const playAssistantAudio = useCallback(
     async (text) => {
-      let objectUrlCleanup = () => {};
+      let cleanupHandler = () => {};
       try {
         const synthesisResult = await synthesizeSpeech(text);
         if (!synthesisResult) {
@@ -399,7 +421,8 @@ const VoiceCallSession = () => {
           activeAudioRef.current = null;
         }
 
-        let audioSource = synthesisResult.url || '';
+        let audioSource = synthesisResult.url || synthesisResult.audioUrl || '';
+        cleanupHandler = typeof synthesisResult.cleanup === 'function' ? synthesisResult.cleanup : () => {};
         if (synthesisResult.base64) {
           const byteCharacters = atob(synthesisResult.base64);
           const byteNumbers = new Array(byteCharacters.length);
@@ -411,7 +434,11 @@ const VoiceCallSession = () => {
             type: synthesisResult.contentType || 'audio/mpeg',
           });
           const objectUrl = URL.createObjectURL(audioBlob);
-          objectUrlCleanup = () => URL.revokeObjectURL(objectUrl);
+          const previousCleanup = cleanupHandler;
+          cleanupHandler = () => {
+            URL.revokeObjectURL(objectUrl);
+            previousCleanup();
+          };
           audioSource = objectUrl;
         }
 
@@ -432,7 +459,7 @@ const VoiceCallSession = () => {
 
         const handleComplete = () => {
           setIsAssistantSpeaking(false);
-          objectUrlCleanup();
+          cleanupHandler();
           audio.removeEventListener('ended', handleComplete);
           audio.removeEventListener('error', handleError);
           if (activeAudioRef.current === audio) {
@@ -443,7 +470,7 @@ const VoiceCallSession = () => {
         const handleError = (event) => {
           console.error('Audio playback error event:', event);
           setIsAssistantSpeaking(false);
-          objectUrlCleanup();
+          cleanupHandler();
           audio.removeEventListener('ended', handleComplete);
           audio.removeEventListener('error', handleError);
           if (activeAudioRef.current === audio) {
@@ -453,7 +480,7 @@ const VoiceCallSession = () => {
             ...prev,
             {
               speaker: 'System',
-              text: 'We could not play the assistant's audio reply. Please check your volume or try again.',
+              text: 'We could not play the assistant\'s audio reply. Please check your volume or try again.',
               timestamp: new Date(),
             },
           ]);
@@ -471,7 +498,7 @@ const VoiceCallSession = () => {
       } catch (error) {
         console.error('Audio playback error:', error);
         setIsAssistantSpeaking(false);
-        objectUrlCleanup();
+        cleanupHandler();
         activeAudioRef.current = null;
         setTranscript((prev) => [
           ...prev,
@@ -520,7 +547,7 @@ const VoiceCallSession = () => {
           ...prev,
           {
             speaker: 'System',
-            text: 'We couldn't hear anything. Please try speaking again.',
+            text: 'We couldn\'t hear anything. Please try speaking again.',
             timestamp: new Date(),
           },
         ]);

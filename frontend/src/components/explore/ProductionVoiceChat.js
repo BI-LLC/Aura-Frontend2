@@ -517,25 +517,81 @@ const ProductionVoiceChat = () => {
       },
       body: params
     });
-    
+
     if (!response.ok) {
       throw new Error(`Synthesis failed: ${response.status}`);
     }
-    
-    const result = await response.json();
-    
-    if (result.success && result.audio) {
-      // Play audio
-      const audioBytes = Uint8Array.from(atob(result.audio), c => c.charCodeAt(0));
-      const audioBlob = new Blob([audioBytes], { type: 'audio/mpeg' });
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      
+
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+
+    let audioUrl = '';
+    let cleanup = () => {};
+
+    if (contentType.includes('application/json')) {
+      const result = await response.json();
+
+      if (result?.success === false) {
+        throw new Error(result?.message || 'Speech synthesis unavailable.');
+      }
+
+      const payloadBase64 = result?.audio || result?.audioContent || '';
+      const payloadUrl = result?.audio_url || result?.url || '';
+      const payloadContentType =
+        result?.content_type || result?.contentType || result?.mime_type || 'audio/mpeg';
+
+      if (payloadBase64) {
+        const binary = atob(payloadBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const audioBlob = new Blob([bytes], { type: payloadContentType });
+        audioUrl = URL.createObjectURL(audioBlob);
+        cleanup = () => URL.revokeObjectURL(audioUrl);
+      } else if (payloadUrl) {
+        audioUrl = payloadUrl;
+      } else {
+        throw new Error('No audio data received from synthesis service');
+      }
+    } else if (contentType.includes('audio/')) {
+      const audioBlob = await response.blob();
+      audioUrl = URL.createObjectURL(audioBlob);
+      cleanup = () => URL.revokeObjectURL(audioUrl);
+    } else {
+      const unexpectedBody = await response.text().catch(() => '');
+      throw new Error(
+        `Unexpected content-type from synth service: ${contentType || 'unknown'}` +
+          (unexpectedBody ? `. ${unexpectedBody}` : '')
+      );
+    }
+
+    if (!audioUrl) {
+      throw new Error('Unable to determine audio URL for playback');
+    }
+
+    const audio = new Audio(audioUrl);
+    audio.preload = 'auto';
+
+    const handleCleanup = () => {
+      cleanup();
+      audio.removeEventListener('ended', handleCleanup);
+      audio.removeEventListener('error', handleError);
+    };
+
+    const handleError = () => {
+      cleanup();
+      audio.removeEventListener('ended', handleCleanup);
+      audio.removeEventListener('error', handleError);
+    };
+
+    audio.addEventListener('ended', handleCleanup);
+    audio.addEventListener('error', handleError);
+
+    try {
       await audio.play();
-      
-      audio.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-      };
+    } catch (playError) {
+      handleError();
+      throw playError;
     }
   };
 
