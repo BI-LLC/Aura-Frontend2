@@ -520,7 +520,7 @@ const VoiceCallSession = () => {
           ...prev,
           {
             speaker: 'System',
-            text: 'We couldn't hear anything. Please try speaking again.',
+            text: "We couldn't hear anything. Please try speaking again.",
             timestamp: new Date(),
           },
         ]);

@@ -756,7 +756,7 @@ const VoiceChat = () => {
       setMessages(prev => [...prev, {
         id: Date.now() + 1,
         type: 'ai',
-        content: data.response || 'I received your message but couldn\'t generate a proper response.',
+        content: data.response || "I received your message but couldn't generate a proper response.",
         timestamp: new Date()
       }]);
     } catch (error) {
@@ -780,7 +780,7 @@ const VoiceChat = () => {
       } else if (error.message.includes('500')) {
         errorMessage += 'The server is experiencing issues. Please try again later.';
       } else {
-        errorMessage += 'Please make sure you\'re connected to the internet and try again.';
+        errorMessage += "Please make sure you're connected to the internet and try again.";
       }
 
       setMessages(prev => [...prev, {
