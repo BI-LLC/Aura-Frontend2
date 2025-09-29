@@ -37,7 +37,7 @@ const sanitizeUsername = (value) => {
 const VoiceChat = () => {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { supabase, isAuthenticated } = useAuth();
+  const { supabase, isAuthenticated, getToken } = useAuth();
 
   // State management
   const [profile, setProfile] = useState(null);
