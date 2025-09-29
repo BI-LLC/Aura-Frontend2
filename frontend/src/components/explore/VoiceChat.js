@@ -398,7 +398,36 @@ const VoiceChat = () => {
         }
       }
 
-      voicePreference = normalizeVoicePreference(voicePreference);
+      const normalizedVoicePreference = normalizeVoicePreference(voicePreference);
+
+      const assistantKey =
+        normalizedVoicePreference?.assistant_key ||
+        normalizedVoicePreference?.assistantKey ||
+        personaSettings.assistant_key ||
+        personaSettings.assistantKey ||
+        profileDetails?.username ||
+        resolvedSlug;
+
+      const voicePreferenceDetails = normalizedVoicePreference
+        ? {
+            voice_id:
+              normalizedVoicePreference.voice_id ||
+              normalizedVoicePreference.voiceId ||
+              normalizedVoicePreference.id ||
+              'default_voice',
+            provider:
+              normalizedVoicePreference.provider ||
+              normalizedVoicePreference.vendor ||
+              'elevenlabs',
+            model:
+              normalizedVoicePreference.model ||
+              normalizedVoicePreference.voice_model ||
+              normalizedVoicePreference.params?.model ||
+              'eleven_monolingual_v1',
+            assistant_key: normalizedVoicePreference.assistant_key || assistantKey || resolvedSlug,
+            ...normalizedVoicePreference,
+          }
+        : null;
 
       let persona = null;
       if (personaResult.error) {
@@ -473,13 +502,15 @@ const VoiceChat = () => {
         avatar: avatarInitials,
         avatarUrl,
         username,
+        assistantKey,
+        voicePrefs: voicePreferenceDetails,
         title: profileDetails?.title || personaSettings.title || generateTitle(displayName, expertiseAreas),
         bio:
           personaSettings.bio?.toString().trim() ||
           personaSettings.description?.toString().trim() ||
           profileDetails?.bio?.toString().trim() ||
           generateBio(preferences, persona),
-        voicePreference: voicePreference || null,
+        voicePreference: voicePreferenceDetails,
         preferences,
         persona,
         totalConversations: conversationsCount,
