@@ -1,0 +1,11 @@
+{
+  "doc_id": "doc_1758552874_sample_movie_review.txt",
+  "filename": "sample_movie_review.txt",
+  "tenant_id": "default_tenant",
+  "user_id": "doc_user_persistent",
+  "upload_time": "2025-09-22T22:54:34.757360",
+  "file_path": "backend\\data\\documents\\default_tenant\\doc_1758552874_sample_movie_review.txt_sample_movie_review.txt",
+  "file_size": 1144,
+  "content": "The Amateur - Movie Review\n\nTitle: The Amateur\nGenre: Action/Thriller\nDirector: James Hawes\nRelease Year: 2024\n\nPlot Summary:\nThe Amateur follows the story of a CIA cryptanalyst who, after a devastating attack on his family, decides to take matters into his own hands. He uses his skills to track down the terrorists responsible, going rogue from the agency in the process.\n\nKey Characters:\n- Charles Heller (played by Rami Malek) - The protagonist, a CIA cryptanalyst seeking revenge\n- Heena Patel (played by Rachel Brosnahan) - A journalist who becomes involved in the case\n- Various CIA agents and terrorist figures\n\nReview:\nThe Amateur presents a compelling premise with strong performances, particularly from Rami Malek. The film balances action sequences with character development, though some plot points feel predictable. The cinematography is solid, with good use of lighting and camera work to build tension.\n\nRating: 7/10\nRecommendation: Worth watching for fans of action thrillers and spy movies.\n\nThis review covers the main aspects of The Amateur movie, including plot, characters, and critical assessment.\n",
+  "doc_type": ".txt"
+}

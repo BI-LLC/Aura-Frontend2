@@ -1,0 +1,11 @@
+{
+  "doc_id": "doc_1758605735_DOMINGO_-_FA1.2.pdf",
+  "filename": "DOMINGO - FA1.2.pdf",
+  "tenant_id": "default_tenant",
+  "user_id": "doc_user_persistent",
+  "upload_time": "2025-09-23T13:35:35.650408",
+  "file_path": "data\\documents\\default_tenant\\doc_1758605735_DOMINGO_-_FA1.2.pdf_DOMINGO - FA1.2.pdf",
+  "file_size": 297206,
+  "content": " \n \n \n \n  \n \n D\n \n  \n \n \n \n  \n \nI worked in a Linux virtual machine and used Ubuntu. I first opened the nano -editor and copied in the \nprovided C code. I created cashier.c file and after saving it, I exited the editor. I used the command line \ngcc cashier.c -o cashier to compile the progra m, which created an executable file cashier. I checked the \nexecutable file by listing all the files in the directory using ls -l. I confirmed the program executed and \ngenerated the correct output by running the command ./cashier, entering sample inputs for  quantity and \npayments, and receiving the change and receipt in the output. All the steps were documented in a word \nfile, which was later converted to a PDF and submitted as part of the project.  \n \n",
+  "doc_type": ".pdf"
+}
