@@ -159,7 +159,7 @@ async def lifespan(app: FastAPI):
             # Import and setup all routers
             from app.routers import (
                 chat, voice, admin, memory, streaming, 
-                documents, continuous_voice, tenant_admin, training
+                documents, continuous_voice, tenant_admin, training, rag_chat, process_documents
             )
             
             # Set services in routers that need them
@@ -175,6 +175,10 @@ async def lifespan(app: FastAPI):
             # Set services for continuous voice router
             if hasattr(continuous_voice, 'set_services'):
                 continuous_voice.set_services(conversation_manager, auth_service)
+            
+            # Set services for RAG chat router
+            if hasattr(rag_chat, 'set_smart_router'):
+                rag_chat.set_smart_router(smart_router)
         
             # Add all routers to app
             app.include_router(chat.router)
@@ -186,6 +190,8 @@ async def lifespan(app: FastAPI):
             app.include_router(continuous_voice.router)
             app.include_router(tenant_admin.router)
             app.include_router(training.router)
+            app.include_router(rag_chat.router)
+            app.include_router(process_documents.router)
             
             logger.info("🎯 AURA Voice AI: All routers and services connected successfully!")
             
@@ -251,6 +257,10 @@ async def root():
         "voice_service": voice_service is not None,
         "endpoints": {
             "chat": "/chat/",
+            "rag_chat": "/rag/chat",
+            "rag_upload": "/rag/upload-document",
+            "rag_search": "/rag/search",
+            "rag_stats": "/rag/stats",
             "voice": "/voice/status",
             "admin": "/admin/dashboard",
             "documents": "/documents/upload",
@@ -530,8 +540,8 @@ async def chat_with_tenant_context(
     message: str
 ):
     # Process chat using only tenant's data
-        tenant_id = request.state.tenant_id
-        user_id = request.state.user_id
+    tenant_id = request.state.tenant_id
+    user_id = request.state.user_id
     
     # Get tenant's knowledge context
     router = tenant_aware_services["smart_router"]
@@ -882,8 +892,8 @@ async def upload_document(
     file: UploadFile = File(...)
 ):
     # Upload document to tenant's knowledge base
-        tenant_id = request.state.tenant_id
-        user_id = request.state.user_id
+    tenant_id = request.state.tenant_id
+    user_id = request.state.user_id
     
     # Validate file
     if file.size > 10 * 1024 * 1024:  # 10MB limit
@@ -921,10 +931,10 @@ async def upload_document(
 @app.get("/api/documents")
 async def get_tenant_documents(request: Request):
     # Get documents for current tenant
-        tenant_id = request.state.tenant_id
+    tenant_id = request.state.tenant_id
     
-            data_service = tenant_aware_services["data_ingestion"]
-            documents = await data_service.get_tenant_documents(tenant_id)
+    data_service = tenant_aware_services["data_ingestion"]
+    documents = await data_service.get_tenant_documents(tenant_id)
     
     return {
         "organization": request.state.organization,

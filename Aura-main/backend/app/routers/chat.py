@@ -49,6 +49,7 @@ class ChatResponse(BaseModel):
     response_time: float
     cost: float
     assistant_key: Optional[str] = None  # NEW: Echo back assistant key for frontend
+    context_method: Optional[str] = "traditional"  # NEW: Context method used (traditional/rag_enhanced)
 
 @router.post("/message", response_model=ChatResponse)
 async def chat_with_documents(request: ChatRequest):
@@ -60,12 +61,23 @@ async def chat_with_documents(request: ChatRequest):
         # Get training data service
         training_service = get_training_data_service()
         
-        # PRIORITY 1: Get training data context (Q&A pairs, logic notes, reference materials)
-        training_context = await training_service.get_training_context(
-            request.message, 
-            request.assistant_key, 
-            request.tenant_id
-        )
+        # PRIORITY 1: Get enhanced training data context 
+        # Try RAG-enhanced context first, fallback to traditional if needed
+        try:
+            training_context = await training_service.get_rag_enhanced_context(
+                request.message, 
+                request.assistant_key, 
+                request.tenant_id
+            )
+            context_method = "rag_enhanced"
+        except Exception as e:
+            logger.warning(f"RAG context failed, using traditional: {e}")
+            training_context = await training_service.get_training_context(
+                request.message, 
+                request.assistant_key, 
+                request.tenant_id
+            )
+            context_method = "traditional"
         
         # PRIORITY 2: Get document context if requested (fallback)
         document_context = ""
@@ -93,6 +105,7 @@ async def chat_with_documents(request: ChatRequest):
                     context_sources = list(set([r['filename'] for r in results[:3]]))
         
         # Build the AI system prompt with STRICT training data enforcement
+        # Enhanced with RAG context awareness
         if training_context:
             # STRICT MODE: Only use training data
             assistant_name = request.assistant_key or "Assistant"
@@ -166,7 +179,8 @@ Response: I don't know."""
             context_sources=context_sources,
             response_time=response.response_time,
             cost=response.cost,
-            assistant_key=request.assistant_key  # Echo back assistant key
+            assistant_key=request.assistant_key,  # Echo back assistant key
+            context_method=context_method  # Show which context method was used
         )
         
     except HTTPException:

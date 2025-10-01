@@ -222,6 +222,46 @@ class TrainingDataService:
             logger.error(f"Error creating reference material: {e}")
             return {'success': False, 'error': str(e)}
 
+    async def get_rag_enhanced_context(
+        self, 
+        user_query: str, 
+        assistant_key: Optional[str] = None, 
+        tenant_id: Optional[str] = None
+    ) -> str:
+        """
+        RAG-enhanced context retrieval combining traditional training + vector search
+        This method provides the most comprehensive context for AI responses
+        """
+        try:
+            # Import here to avoid circular dependency
+            from app.services.rag_pipeline import get_rag_pipeline
+            
+            logger.info(f"Using RAG-enhanced context retrieval for query: {user_query[:50]}...")
+            
+            # Use RAG pipeline for comprehensive context
+            rag_pipeline = get_rag_pipeline()
+            rag_context = await rag_pipeline.retrieve_context(
+                user_query, assistant_key, tenant_id
+            )
+            
+            # Enhanced system prompt with RAG context
+            if rag_context.context_text and rag_context.confidence_score >= 0.1:
+                logger.info(f"RAG context retrieved successfully (confidence: {rag_context.confidence_score:.2f}, sources: {rag_context.context_sources})")
+                return rag_context.context_text
+            else:
+                # Fallback to existing method if RAG confidence is too low
+                logger.info(f"RAG confidence too low ({rag_context.confidence_score:.2f}), falling back to traditional training data")
+                return await self.get_training_context(user_query, assistant_key, tenant_id)
+            
+        except ImportError:
+            logger.debug("RAG pipeline not available, using traditional training data")
+            return await self.get_training_context(user_query, assistant_key, tenant_id)
+        except Exception as e:
+            logger.error(f"RAG enhanced context failed: {e}")
+            # Fallback to existing system
+            logger.info("Falling back to traditional training data retrieval")
+            return await self.get_training_context(user_query, assistant_key, tenant_id)
+
 # Global training data service instance
 training_data_service = TrainingDataService()
 

@@ -21,12 +21,12 @@ env_loaded = False
 for env_path in env_paths:
     if env_path.exists():
         load_dotenv(env_path, verbose=True)
-        print(f"✅ Loaded .env from: {env_path.absolute()}")
+        print(f"Loaded .env from: {env_path.absolute()}")
         env_loaded = True
         break
 
 if not env_loaded:
-    print("⚠️ No .env file found, using environment variables only")
+    print("No .env file found, using environment variables only")
 
 class Settings(BaseSettings):
     # allow .env extras so we don't crash on unused vars

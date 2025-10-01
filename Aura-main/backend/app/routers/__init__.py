@@ -10,6 +10,7 @@ from . import streaming
 from . import continuous_voice
 from . import tenant_admin
 from . import training
+from . import rag_chat
 
 # Try to import optional routers
 try:
@@ -26,5 +27,6 @@ __all__ = [
     'continuous_voice',
     'tenant_admin',
     'training',
+    'rag_chat',
     'memory'
 ]
