@@ -270,11 +270,12 @@ export const chatbotService = {
   },
 
   // Send message to chatbot
-  sendMessage: async (message, conversationId = null) => {
+  sendMessage: async (message, conversationId = null, assistantKey = null) => {
     try {
-      const result = await apiHelper.post('/chatbot/chat', {
+      const result = await apiHelper.post('/rag/chat', {
         message,
-        conversation_id: conversationId
+        assistant_key: assistantKey,
+        session_id: conversationId
       });
 
       if (result.success) {
