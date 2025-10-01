@@ -812,7 +812,7 @@ const VoiceChat = () => {
       console.log('📤 Sending chat request:', { headers: Object.keys(headers), body: requestBody });
 
       // Call the backend API with new structure
-      const response = await fetch(`${API_BASE_URL}/chat/message`, {
+      const response = await fetch(`${API_BASE_URL}/rag/chat`, {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody)
