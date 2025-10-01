@@ -429,7 +429,19 @@ const ProductionVoiceChat = () => {
   };
 
   const getAIResponse = async (message) => {
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/chat/message`, {
+    // Get dynamic assistant key from user metadata
+    const assistantKeyCandidates = [
+      user?.user_metadata?.assistant_key,
+      user?.user_metadata?.assistantKey,
+      user?.user_metadata?.slug,
+      user?.user_metadata?.profile_slug,
+      user?.user_metadata?.persona_slug,
+      user?.user_metadata?.username,
+    ]
+      .map((value) => (value ? value.toString().trim() : ''))
+      .filter(Boolean);
+    const assistantKey = assistantKeyCandidates[0] || 'default';
+    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || 'https://api.iaura.ai'}/rag/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -437,6 +449,7 @@ const ProductionVoiceChat = () => {
       },
       body: JSON.stringify({
         message: message,
+        assistant_key: assistantKey,
         user_id: user?.id || 'anonymous',
         use_memory: true,
         search_knowledge: true,
