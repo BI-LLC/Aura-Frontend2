@@ -221,7 +221,7 @@ const VoiceCallSession = () => {
 
       console.log('🤖 Fetching AI response with:', { assistantKey, tenantId, message: message.substring(0, 50) + '...' });
 
-      const response = await fetch(`${API_BASE_URL}/chat/message`, {
+      const response = await fetch(`${API_BASE_URL}/rag/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
